@@ -26,7 +26,7 @@ Any questions you can discuss with author in [Telegram](https://t.me/xVibeNot)
 
 ### Speed benchmarks
 
-All tests was on **RTX 3090**
+Tested on **RTX 3090**
 
 **TTFB** - latency to first chunk of speech
 

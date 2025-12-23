@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-CosyVoice3 TTS - Упрощённый скрипт для streaming инференса с замером метрик
+CosyVoice3 TTS - Simplified script for streaming inference with metrics measurement
 
-Использует метод inference_zero_shot для генерации с клонированием голоса.
-Использует TRT и FP16 для оптимизации.
+Uses inference_zero_shot method for generation with voice cloning.
+Uses TRT and FP16 for optimization.
 
-Метрики:
-- TTFB (Time To First Byte): время до получения первого чанка аудио
-- RTF (Real-Time Factor): время_синтеза / длительность_аудио (< 1.0 = быстрее реалтайма)
-- Длительность итогового аудио
-- Общее время генерации
+Metrics:
+- TTFB (Time To First Byte): time until first audio chunk is received
+- RTF (Real-Time Factor): synthesis_time / audio_duration (< 1.0 = faster than real-time)
+- Final audio duration
+- Total generation time
 """
 
 import sys
@@ -24,10 +24,10 @@ import torch
 import torchaudio
 from cosyvoice.cli.cosyvoice import CosyVoice3
 
-# Оптимизация для matmul операций
+# Optimization for matmul operations
 torch.set_float32_matmul_precision('high')
 
-# Настройка логгера
+# Logger configuration
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s | %(levelname)s | %(message)s',
@@ -37,34 +37,34 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================================
-# КОНФИГУРАЦИЯ
+# CONFIGURATION
 # ============================================================================
 
-# Директория с моделью
+# Model directory
 MODEL_DIR = 'pretrained_models/Fun-CosyVoice3-0.5B'
 
-# Референсный аудио файл (3-10 сек, чистая запись)
-REFERENCE_AUDIO = 'refs/yaga.wav'
+# Reference audio file (3-10 sec, clean recording)
+REFERENCE_AUDIO = 'refs/audio.wav'
 
-# Директория для результатов
-OUTPUT_DIR = 'output'
+# Output directory
+OUTPUT_DIR = 'output/run_basic'
 
-# Инструкция для модели
+# Instruction for the model
 INSTRUCTION = "You are a helpful assistant."
 
-# Тексты для синтеза
+# Texts for synthesis
 SYNTHESIS_TEXTS = [
     "Привет! Это тестовый синтез русского текста с использованием модели CosyVoice3.",
     "Второй пример текста для генерации. [cough] [cough] Блять! Надо бы бросать курить",
-    "И третий текст [laughter] для демонстрации [laughter] возможности генерировать [laughter] смехуёчки.",
+    "И третий текст [laughter] для демонстрации [laughter] возможности генерировать [laughter] [laughter] смехуёчки.",
 ]
 
 
 def load_prompt_text(audio_path: str, instruction: str = INSTRUCTION) -> str:
     """
-    Загружает транскрипцию из txt файла и формирует prompt_text.
+    Loads transcription from txt file and forms prompt_text.
     
-    Формат prompt_text: "{instruction}<|endofprompt|>{транскрипция}"
+    Format prompt_text: "{instruction}<|endofprompt|>{transcription}"
     """
     txt_path = audio_path.rsplit('.', 1)[0] + '.txt'
     
@@ -83,13 +83,13 @@ def synthesize_streaming(
     output_path: str
 ) -> dict:
     """
-    Выполняет streaming синтез текста через zero_shot и возвращает метрики.
+    Performs streaming synthesis of text via zero_shot and returns metrics.
     
     Args:
-        prompt_text: Транскрипция референсного аудио в формате "{instruction}<|endofprompt|>{транскрипция}"
+        prompt_text: Transcription of reference audio in format "{instruction}<|endofprompt|>{transcription}"
     
     Returns:
-        dict с ключами: ttfb, total_time, audio_duration, rtf, chunk_count
+        dict with keys: ttfb, total_time, audio_duration, rtf, chunk_count
     """
     start_time = time.time()
     first_chunk_time = None
@@ -118,7 +118,7 @@ def synthesize_streaming(
     
     total_time = time.time() - start_time
     
-    # Объединяем чанки и сохраняем
+    # Concatenate chunks and save
     if audio_chunks:
         full_audio = torch.cat(audio_chunks, dim=1)
         torchaudio.save(output_path, full_audio, sample_rate)
@@ -142,40 +142,40 @@ def main():
     print("CosyVoice3 TTS - Streaming Inference (zero_shot)")
     print("=" * 70)
     
-    # Проверяем наличие модели
+    # Check if model exists
     if not os.path.exists(MODEL_DIR):
-        logger.error(f"Модель не найдена: {MODEL_DIR}", exc_info=True)
+        logger.error(f"Model not found: {MODEL_DIR}", exc_info=True)
         return
     
-    # Проверяем наличие референсного аудио
+    # Check if reference audio exists
     if not os.path.exists(REFERENCE_AUDIO):
-        logger.error(f"Референсный аудио не найден: {REFERENCE_AUDIO}", exc_info=True)
+        logger.error(f"Reference audio not found: {REFERENCE_AUDIO}", exc_info=True)
         return
     
-    # Создаём директорию для результатов
+    # Create output directory
     Path(OUTPUT_DIR).mkdir(exist_ok=True)
     
-    # Загружаем prompt_text из txt файла рядом с аудио
+    # Load prompt_text from txt file next to audio
     prompt_text = load_prompt_text(REFERENCE_AUDIO, INSTRUCTION)
     
-    print(f"\n🎤 Референсный аудио: {REFERENCE_AUDIO}")
-    print(f"📝 Текстов для синтеза: {len(SYNTHESIS_TEXTS)}")
+    print(f"\n🎤 Reference audio: {REFERENCE_AUDIO}")
+    print(f"📝 Texts for synthesis: {len(SYNTHESIS_TEXTS)}")
     
-    # Загрузка модели (TRT и FP16)
-    print("\n🔧 Загрузка модели...")
+    # Load model (TRT and FP16)
+    print("\n🔧 Loading model...")
     load_start = time.time()
     
     cosyvoice = CosyVoice3(
         model_dir=MODEL_DIR,
-        fp16=True,
+        fp16=False,
         load_vllm=False,
-        load_trt=True,
+        load_trt=False,
     )
     
     load_time = time.time() - load_start
-    print(f"✅ Модель загружена за {load_time:.2f} сек")
+    print(f"✅ Model loaded in {load_time:.2f} sec")
     
-    # Диагностика dtype
+    # dtype diagnostics
     llm_dtype = next(cosyvoice.model.llm.parameters()).dtype
     flow_dtype = next(cosyvoice.model.flow.parameters()).dtype
     hift_dtype = next(cosyvoice.model.hift.parameters()).dtype
@@ -184,21 +184,21 @@ def main():
     sample_rate = cosyvoice.sample_rate
     print(f"📊 Sample rate: {sample_rate} Hz")
     
-    # Подготовка эмбеддингов спикера (один раз)
-    print("\n🎯 Подготовка эмбеддингов спикера...")
+    # Prepare speaker embeddings (once)
+    print("\n🎯 Preparing speaker embeddings...")
     spk_id = "reference_speaker"
     embed_start = time.time()
     cosyvoice.add_zero_shot_spk(prompt_text, REFERENCE_AUDIO, spk_id)
     embed_time = time.time() - embed_start
-    print(f"✅ Эмбеддинги подготовлены за {embed_time:.3f} сек")
+    print(f"✅ Embeddings prepared in {embed_time:.3f} sec")
     
-    # Сводка по всем текстам
+    # Summary for all texts
     all_metrics = []
     
-    # Генерация всех текстов
+    # Generate all texts
     for idx, text in enumerate(SYNTHESIS_TEXTS, 1):
         print("\n" + "=" * 70)
-        print(f"📄 Текст {idx}/{len(SYNTHESIS_TEXTS)}")
+        print(f"📄 Text {idx}/{len(SYNTHESIS_TEXTS)}")
         print("=" * 70)
         print(f"📝 {text[:80]}{'...' if len(text) > 80 else ''}")
         
@@ -208,7 +208,7 @@ def main():
             metrics = synthesize_streaming(
                 cosyvoice=cosyvoice,
                 text=text,
-                prompt_text=prompt_text,  # транскрипция референсного аудио
+                prompt_text=prompt_text,  # transcription of reference audio
                 spk_id=spk_id,
                 sample_rate=sample_rate,
                 output_path=output_file,
@@ -216,28 +216,28 @@ def main():
             
             all_metrics.append(metrics)
             
-            print(f"\n💾 Сохранено: {output_file}")
-            print("\n📊 МЕТРИКИ:")
+            print(f"\n💾 Saved: {output_file}")
+            print("\n📊 METRICS:")
             print("-" * 40)
-            print(f"⚡ TTFB:             {metrics['ttfb']:.3f} сек")
-            print(f"⏱️  Общее время:      {metrics['total_time']:.3f} сек")
-            print(f"🎵 Длительность:     {metrics['audio_duration']:.3f} сек")
+            print(f"⚡ TTFB:             {metrics['ttfb']:.3f} sec")
+            print(f"⏱️  Total time:       {metrics['total_time']:.3f} sec")
+            print(f"🎵 Duration:         {metrics['audio_duration']:.3f} sec")
             print(f"📈 RTF:              {metrics['rtf']:.3f}")
-            print(f"📦 Чанков:           {metrics['chunk_count']}")
+            print(f"📦 Chunks:           {metrics['chunk_count']}")
             
             if metrics['rtf'] < 1.0:
-                print(f"✅ Быстрее реалтайма в {1/metrics['rtf']:.1f}x")
+                print(f"✅ Faster than real-time by {1/metrics['rtf']:.1f}x")
             else:
-                print(f"⚠️  Медленнее реалтайма в {metrics['rtf']:.1f}x")
+                print(f"⚠️  Slower than real-time by {metrics['rtf']:.1f}x")
                 
         except Exception as e:
-            logger.error(f"Ошибка при синтезе текста #{idx}: {e}", exc_info=True)
+            logger.error(f"Error synthesizing text #{idx}: {e}", exc_info=True)
             continue
     
-    # Итоговая сводка
+    # Final summary
     if all_metrics:
         print("\n" + "=" * 70)
-        print("📊 ИТОГОВАЯ СВОДКА")
+        print("📊 FINAL SUMMARY")
         print("=" * 70)
         
         avg_ttfb = sum(m['ttfb'] for m in all_metrics) / len(all_metrics)
@@ -245,15 +245,15 @@ def main():
         total_audio = sum(m['audio_duration'] for m in all_metrics)
         total_time = sum(m['total_time'] for m in all_metrics)
         
-        print(f"Средний TTFB:        {avg_ttfb:.3f} сек")
-        print(f"Средний RTF:         {avg_rtf:.3f}")
-        print(f"Общая длительность:  {total_audio:.3f} сек")
-        print(f"Общее время:         {total_time:.3f} сек")
+        print(f"Average TTFB:        {avg_ttfb:.3f} sec")
+        print(f"Average RTF:         {avg_rtf:.3f}")
+        print(f"Total duration:      {total_audio:.3f} sec")
+        print(f"Total time:          {total_time:.3f} sec")
     
     print("\n" + "=" * 70)
-    print("✅ ГЕНЕРАЦИЯ ЗАВЕРШЕНА!")
+    print("✅ GENERATION COMPLETE!")
     print("=" * 70)
-    print(f"\n📁 Результаты: {OUTPUT_DIR}/")
+    print(f"\n📁 Results: {OUTPUT_DIR}/")
 
 
 if __name__ == '__main__':

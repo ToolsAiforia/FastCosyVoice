@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-CosyVoice3 TTS - Simplified script for streaming inference with metrics measurement
+FastCosyVoice3 TTS - Parallel pipeline streaming inference with metrics measurement
 
-Uses inference_zero_shot method for generation with voice cloning.
-Applies torch.compile to accelerate LLM inference (~2x speedup).
+Uses FastCosyVoice3 with parallel pipeline and TensorRT acceleration:
+- LLM: TensorRT-LLM (~3x speedup) or PyTorch with torch.compile
+- Flow: TensorRT (~2.5x speedup)
+- Hift: PyTorch (f0_predictor on CPU)
 
 Metrics:
 - TTFB (Time To First Byte): time until first audio chunk is received
@@ -20,6 +22,10 @@ from pathlib import Path
 
 sys.path.append('third_party/Matcha-TTS')
 
+import torch
+import torchaudio
+from fastcosyvoice import FastCosyVoice3
+
 
 def get_gpu_memory_stats() -> dict:
     """
@@ -28,7 +34,6 @@ def get_gpu_memory_stats() -> dict:
     Returns:
         dict with keys: allocated_gb, reserved_gb, max_allocated_gb
     """
-    import torch
     if not torch.cuda.is_available():
         return {'allocated_gb': 0.0, 'reserved_gb': 0.0, 'max_allocated_gb': 0.0}
     
@@ -49,13 +54,8 @@ def print_gpu_memory(label: str) -> None:
     print(f"\n📊 GPU Memory [{label}]:")
     print(f"   Allocated: {stats['allocated_gb']:.2f} GB")
     print(f"   Reserved: {stats['reserved_gb']:.2f} GB")
-    print(f"   Peak allocated: {stats['max_allocated_gb']:.2f} GB")
-
-import torch
-import torchaudio
-from cosyvoice.cli.cosyvoice import CosyVoice3
-
-# Optimization for torch.compile
+    print(f"   Peak Allocated: {stats['max_allocated_gb']:.2f} GB")
+# Optimization for torch.compile (if used)
 torch.set_float32_matmul_precision('high')
 
 # Logger configuration
@@ -78,10 +78,21 @@ MODEL_DIR = 'pretrained_models/Fun-CosyVoice3-0.5B'
 REFERENCE_AUDIO = 'refs/audio.wav'
 
 # Output directory
-OUTPUT_DIR = 'output/run'
+OUTPUT_DIR = 'output/run_fast'
 
 # Instruction for the model
 INSTRUCTION = "You are a helpful assistant."
+
+# TensorRT settings
+USE_TRT_FLOW = True       # TensorRT for Flow decoder (~2.5x speedup)
+USE_TRT_LLM = True        # TensorRT-LLM for LLM (~3x speedup)
+TRT_LLM_DTYPE = 'bfloat16'  # bfloat16/float16/float32
+# Fraction of VRAM that TensorRT-LLM pre-reserves for KV-cache.
+# This is often the main memory consumer. Decrease if VRAM usage is high (e.g., 0.10-0.20).
+TRT_LLM_KV_CACHE_FRACTION = 0.10
+
+# Inference wrapper without autograd (reduces allocations and graph leak risk)
+USE_INFERENCE_MODE = True
 
 # Texts for synthesis
 SYNTHESIS_TEXTS = [
@@ -105,11 +116,11 @@ def load_prompt_text(audio_path: str, instruction: str = INSTRUCTION) -> str:
     return f"{instruction}<|endofprompt|>{transcription}"
 
 
-def apply_torch_compile(cosyvoice: CosyVoice3) -> None:
+def apply_torch_compile(cosyvoice: FastCosyVoice3) -> None:
     """
-    Applies torch.compile to LLM model to accelerate inference.
+    Applies torch.compile to LLM model for inference acceleration.
     
-    Compiles internal Qwen2ForCausalLM.model (Qwen2Model),
+    Compiles the internal Qwen2ForCausalLM.model (Qwen2Model),
     which is used in forward_one_step for auto-generation.
     """
     # Path to Qwen2Model: cosyvoice.model.llm.llm.model.model
@@ -128,7 +139,7 @@ def apply_torch_compile(cosyvoice: CosyVoice3) -> None:
 
 
 def warmup_model(
-    cosyvoice: CosyVoice3,
+    cosyvoice: FastCosyVoice3,
     prompt_text: str,
     spk_id: str,
 ) -> None:
@@ -139,7 +150,7 @@ def warmup_model(
     so the model needs to be warmed up on texts of different lengths.
     
     Args:
-        cosyvoice: Initialized CosyVoice3 model
+        cosyvoice: Initialized FastCosyVoice3 model
         prompt_text: Prompt text for generation
         spk_id: Speaker ID (should already be added via add_zero_shot_spk)
     """
@@ -161,12 +172,11 @@ def warmup_model(
     logger.info("Warmup: first pass (kernel compilation)...")
     for i, text in enumerate(warmup_texts):
         logger.info(f"  Warmup text {i+1}/{len(warmup_texts)}: {len(text)} characters")
-        for _ in cosyvoice.inference_zero_shot(
+        for _ in cosyvoice.inference_zero_shot_stream(
             tts_text=text,
             prompt_text=prompt_text,
             prompt_wav=REFERENCE_AUDIO,
             zero_shot_spk_id=spk_id,
-            stream=True,
         ):
             pass  # Just generate all chunks
     
@@ -176,12 +186,11 @@ def warmup_model(
     # Second pass - ensure all paths are compiled
     logger.info("Warmup: second pass (stabilization)...")
     for text in warmup_texts:
-        for _ in cosyvoice.inference_zero_shot(
+        for _ in cosyvoice.inference_zero_shot_stream(
             tts_text=text,
             prompt_text=prompt_text,
             prompt_wav=REFERENCE_AUDIO,
             zero_shot_spk_id=spk_id,
-            stream=True,
         ):
             pass
     
@@ -193,7 +202,7 @@ def warmup_model(
 
 
 def synthesize_streaming(
-    cosyvoice: CosyVoice3,
+    cosyvoice: FastCosyVoice3,
     text: str,
     prompt_text: str,
     spk_id: str,
@@ -201,10 +210,15 @@ def synthesize_streaming(
     output_path: str
 ) -> dict:
     """
-    Performs streaming synthesis of text via zero_shot and returns metrics.
+    Performs streaming synthesis of text through parallel pipeline and returns metrics.
     
     Args:
-        prompt_text: Reference audio transcription in format "{instruction}<|endofprompt|>{transcription}"
+        cosyvoice: FastCosyVoice3 model
+        text: Text for synthesis
+        prompt_text: Reference audio transcription
+        spk_id: Speaker ID
+        sample_rate: Sample rate
+        output_path: Path to save the result
     
     Returns:
         dict with keys: ttfb, total_time, audio_duration, rtf, chunk_count
@@ -213,23 +227,30 @@ def synthesize_streaming(
     first_chunk_time = None
     audio_chunks = []
     chunk_count = 0
-    
-    for model_output in cosyvoice.inference_zero_shot(
-        tts_text=text,
-        prompt_text=prompt_text,
-        prompt_wav=REFERENCE_AUDIO,
-        zero_shot_spk_id=spk_id,
-        stream=True,
-    ):
-        chunk_count += 1
-        
-        if first_chunk_time is None:
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-            first_chunk_time = time.time() - start_time
-        
-        speech = model_output['tts_speech']
-        audio_chunks.append(speech)
+
+    infer_ctx = torch.inference_mode() if USE_INFERENCE_MODE else torch.no_grad()
+    with infer_ctx:
+        for model_output in cosyvoice.inference_zero_shot_stream(
+            tts_text=text,
+            prompt_text=prompt_text,
+            prompt_wav=REFERENCE_AUDIO,
+            zero_shot_spk_id=spk_id,
+        ):
+            chunk_count += 1
+
+            if first_chunk_time is None:
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                first_chunk_time = time.time() - start_time
+
+            # In TRT-LLM mode audio is already on CPU (pinned), but just in case
+            # we don't let GPU tensors accumulate in the chunk list.
+            speech = model_output['tts_speech']
+            if getattr(speech, "is_cuda", False):
+                speech = speech.detach().cpu()
+            else:
+                speech = speech.detach()
+            audio_chunks.append(speech)
     
     if torch.cuda.is_available():
         torch.cuda.synchronize()
@@ -257,17 +278,17 @@ def synthesize_streaming(
 
 def main():
     print("=" * 70)
-    print("CosyVoice3 TTS - Streaming Inference (zero_shot)")
+    print("FastCosyVoice3 TTS - Parallel Pipeline Streaming Inference")
     print("=" * 70)
     
-    # Check if model exists
-    if not os.path.exists(MODEL_DIR):
-        logger.error(f"Model not found: {MODEL_DIR}", exc_info=True)
-        return
-    
-    # Check if reference audio exists
-    if not os.path.exists(REFERENCE_AUDIO):
-        logger.error(f"Reference audio not found: {REFERENCE_AUDIO}", exc_info=True)
+    # Check for model / reference
+    try:
+        if not os.path.exists(MODEL_DIR):
+            raise FileNotFoundError(f"Model not found: {MODEL_DIR}")
+        if not os.path.exists(REFERENCE_AUDIO):
+            raise FileNotFoundError(f"Reference audio not found: {REFERENCE_AUDIO}")
+    except FileNotFoundError as e:
+        logger.error(str(e), exc_info=True)
         return
     
     # Create output directory
@@ -279,19 +300,30 @@ def main():
     print(f"\n🎤 Reference audio: {REFERENCE_AUDIO}")
     print(f"📝 Texts for synthesis: {len(SYNTHESIS_TEXTS)}")
     
-    # Load model (without optimizations)
-    print("\n🔧 Loading model...")
+    # Load model with parallel pipeline and TensorRT
+    print("\n🔧 Loading FastCosyVoice3...")
+    print(f"   - TensorRT Flow: {'✅' if USE_TRT_FLOW else '❌'}")
+    print(f"   - TensorRT-LLM:  {'✅' if USE_TRT_LLM else '❌'} (dtype={TRT_LLM_DTYPE})")
+    
     load_start = time.time()
     
-    cosyvoice = CosyVoice3(
+    cosyvoice = FastCosyVoice3(
         model_dir=MODEL_DIR,
         fp16=True,
         load_vllm=False,
-        load_trt=True,
+        load_trt=USE_TRT_FLOW,       # TensorRT for Flow decoder (~2.5x speedup)
+        load_trt_llm=USE_TRT_LLM,    # TensorRT-LLM for LLM (~3x speedup)
+        trt_llm_dtype=TRT_LLM_DTYPE,
+        trt_llm_kv_cache_fraction=TRT_LLM_KV_CACHE_FRACTION,
     )
     
     load_time = time.time() - load_start
     print(f"✅ Model loaded in {load_time:.2f} sec")
+    
+    if USE_TRT_LLM and cosyvoice.trt_llm_loaded:
+        print("✅ TensorRT-LLM loaded successfully")
+    elif USE_TRT_LLM:
+        print("⚠️ TensorRT-LLM not loaded, using PyTorch")
     
     print_gpu_memory("after model loading")
     
@@ -304,12 +336,27 @@ def main():
     sample_rate = cosyvoice.sample_rate
     print(f"📊 Sample rate: {sample_rate} Hz")
     
-    # Apply torch.compile to LLM
-    print("\n⚡ Applying torch.compile to LLM...")
-    compile_start = time.time()
-    apply_torch_compile(cosyvoice)
-    compile_time = time.time() - compile_start
-    print(f"✅ torch.compile applied in {compile_time:.3f} sec")
+    # Parallel pipeline information
+    print("\n🚀 Parallel pipeline:")
+    if USE_TRT_LLM and cosyvoice.trt_llm_loaded:
+        print("   - LLM: TensorRT-LLM (~3x speedup)")
+    else:
+        print("   - LLM: PyTorch + torch.compile")
+    if USE_TRT_FLOW:
+        print("   - Flow: TensorRT (~2.5x speedup)")
+    else:
+        print("   - Flow: PyTorch")
+    print("   - Hift: PyTorch (f0_predictor on CPU)")
+    
+    # Apply torch.compile to LLM only if TRT-LLM is not used
+    if not (USE_TRT_LLM and cosyvoice.trt_llm_loaded):
+        print("\n⚡ Applying torch.compile to LLM...")
+        compile_start = time.time()
+        apply_torch_compile(cosyvoice)
+        compile_time = time.time() - compile_start
+        print(f"✅ torch.compile applied in {compile_time:.3f} sec")
+    else:
+        print("\n⚡ torch.compile skipped (using TensorRT-LLM)")
     
     # Prepare speaker embeddings (once)
     print("\n🎯 Preparing speaker embeddings...")
@@ -319,10 +366,25 @@ def main():
     embed_time = time.time() - embed_start
     print(f"✅ Embeddings prepared in {embed_time:.3f} sec")
     
-    # Model warmup (graph compilation)
-    print("\n🔥 Warming up model (compiling graphs for different text lengths)...")
-    warmup_model(cosyvoice, prompt_text, spk_id)
-    print("✅ Model warmed up and ready")
+    # Model warmup
+    if USE_TRT_LLM and cosyvoice.trt_llm_loaded:
+        # With TRT-LLM warmup is shorter - only Flow and Hift
+        print("\n🔥 Warming up model (TRT-LLM doesn't require long warmup)...")
+        for _ in cosyvoice.inference_zero_shot_stream(
+            tts_text="Short model warmup.",
+            prompt_text=prompt_text,
+            prompt_wav=REFERENCE_AUDIO,
+            zero_shot_spk_id=spk_id,
+        ):
+            pass
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        print("✅ Model warmed up")
+    else:
+        # Without TRT-LLM full warmup is needed for torch.compile
+        print("\n🔥 Warming up model (compiling graphs for different text lengths)...")
+        warmup_model(cosyvoice, prompt_text, spk_id)
+        print("✅ Model warmed up and ready")
     
     print_gpu_memory("after warmup")
     
@@ -346,7 +408,7 @@ def main():
             metrics = synthesize_streaming(
                 cosyvoice=cosyvoice,
                 text=text,
-                prompt_text=prompt_text,  # reference audio transcription
+                prompt_text=prompt_text,
                 spk_id=spk_id,
                 sample_rate=sample_rate,
                 output_path=output_file,
@@ -371,14 +433,33 @@ def main():
         except Exception as e:
             logger.error(f"Error synthesizing text #{idx}: {e}", exc_info=True)
             continue
+
+        # Attempt to free temporary PyTorch buffers after each text.
+        # Important: KV-cache TensorRT-LLM and TensorRT workspace are not freed this way
+        # (they live as long as the runner/engine lives).
+        try:
+            import gc
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+        except Exception as e:
+            logger.error(f"Error clearing memory after text #{idx}: {e}", exc_info=True)
     
     print_gpu_memory("after generation")
     
     # Final summary
     if all_metrics:
         print("\n" + "=" * 70)
-        print("📊 FINAL SUMMARY")
+        print("📊 FINAL SUMMARY (FastCosyVoice3)")
         print("=" * 70)
+        
+        # Configuration
+        llm_backend = "TensorRT-LLM" if (USE_TRT_LLM and cosyvoice.trt_llm_loaded) else "PyTorch+torch.compile"
+        flow_backend = "TensorRT" if USE_TRT_FLOW else "PyTorch"
+        print(f"LLM:  {llm_backend}")
+        print(f"Flow: {flow_backend}")
+        print("-" * 40)
         
         avg_ttfb = sum(m['ttfb'] for m in all_metrics) / len(all_metrics)
         avg_rtf = sum(m['rtf'] for m in all_metrics) / len(all_metrics)
@@ -389,6 +470,9 @@ def main():
         print(f"Average RTF:         {avg_rtf:.3f}")
         print(f"Total duration:      {total_audio:.3f} sec")
         print(f"Total time:          {total_time:.3f} sec")
+        
+        if avg_rtf < 1.0:
+            print(f"\n✅ Average speed: {1/avg_rtf:.1f}x faster than real-time")
     
     print("\n" + "=" * 70)
     print("✅ GENERATION COMPLETED!")

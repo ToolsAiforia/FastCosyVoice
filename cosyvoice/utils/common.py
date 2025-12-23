@@ -205,9 +205,15 @@ def mask_to_bias(mask: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
     assert dtype in [torch.float32, torch.bfloat16, torch.float16]
     mask = mask.to(dtype)
     # attention mask bias
-    # NOTE(Mddct): torch.finfo jit issues
-    #     chunk_masks = (1.0 - chunk_masks) * torch.finfo(dtype).min
-    mask = (1.0 - mask) * -1.0e+10
+    # IMPORTANT:
+    # This bias is often CONSTANT-FOLDED into ONNX during export (export runs in fp32),
+    # and later TensorRT may run the network in fp16. If we use something like -1e10 in fp32,
+    # it will overflow to -inf when cast to fp16, and softmax can emit NaNs (e.g. fully-masked rows).
+    #
+    # Use a fp16-safe "very negative" constant for ALL dtypes.
+    # -1e4 is sufficient to zero out probabilities after softmax and is representable in fp16.
+    neg = -1.0e4
+    mask = (1.0 - mask) * neg
     return mask
 
 

@@ -1,6 +1,6 @@
 FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
 
-ARG VENV_NAME="cosyvoice"
+ARG VENV_NAME="fastcosyvoice"
 ENV VENV=$VENV_NAME
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 
@@ -40,12 +40,12 @@ ENV PATH /opt/conda/bin:/opt/conda/envs/${VENV}/bin:$PATH
 
 WORKDIR /workspace
 
-ENV PYTHONPATH="${PYTHONPATH}:/workspace/CosyVoice:/workspace/CosyVoice/third_party/Matcha-TTS"
+ENV PYTHONPATH="${PYTHONPATH}:/workspace/FastCosyVoice:/workspace/FastCosyVoice/third_party/Matcha-TTS"
 
-RUN git clone --recursive https://github.com/FunAudioLLM/CosyVoice.git
+RUN git clone --recursive https://github.com/Brakanier/FastCosyVoice.git
 
 RUN conda activate ${VENV} && conda install -y -c conda-forge pynini==2.1.5
-RUN conda activate ${VENV} && cd CosyVoice && \
+RUN conda activate ${VENV} && cd FastCosyVoice && \
     pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host=mirrors.aliyun.com --no-cache-dir
 
-WORKDIR /workspace/CosyVoice
+WORKDIR /workspace/FastCosyVoice

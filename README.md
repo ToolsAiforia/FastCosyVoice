@@ -3,20 +3,41 @@
 
 ## What`s new in FastCosyVoice
 
+- Using uv as package manager
 - More optimized inference
 - Fixed expensive calculations
 - Apply fp16 to llm module
-- Example with faster inference
+- FastCosyVoice class with TensorRT-LLM support
+- Examples with faster inference
 
 ### Examples:
 
-`simple_run.py` - fast way to try model
+`run_basic.py` - fast way to try model, basic configuration
 
-`run.py` - inference with torch.compile (take time for compiling and warming)
+`run.py` - inference with fp16, trt flow part and torch.compile (take time for compiling)
+
+`run_fast.py` - inference with fp16, trt flow part, trt llm (take time for converting)
 
 `benchmark_llm.py` - benchmark llm module in different configurations
 
 Any questions you can discuss with author in [Telegram](https://t.me/xVibeNot)
+
+
+### Speed benchmarks
+
+All tests was on **RTX 3090**
+
+**TTFB** - latency to first chunk of speech
+
+**RTF** - inference time / output speech duration
+
+| Configuration | TTFB | RTF |
+| :--- | :---: | :---: |
+| basic | 2.691 sec | 1.184 |
+| fp16 + TRT Flow + torch.compile | 0.706 sec | 0.487 |
+| fp16 + TRT Flow + TRT LLM | 0.470 sec | 0.245 |
+
+
 
 ## 👉🏻 CosyVoice 👈🏻
 
@@ -174,8 +195,18 @@ Follow the code in `example.py` for detailed usage of each model.
 ```sh
 python example.py  # original way
 
-uv run python run.py  # faster way
+uv run python run.py  # faster way, tensorRT for flow and torch.compile for llm
+
+uv run python run_new.py # best speed, tensorRT for flow and tensorRT-LLM for llm
 ```
+
+### Flow (DiT) onnx export for TensorRT optimization (for load_trt=True)
+``` sh
+uv run python cosyvoice/bin/export_onnx_optimized.py \
+    --model_dir pretrained_models/Fun-CosyVoice3-0.5B \
+    --fp16 --trt
+```
+
 
 #### CosyVoice2 vllm Usage
 If you want to use vllm for inference, please install `vllm==v0.9.0`. Older vllm version do not support CosyVoice2 inference.

@@ -22,7 +22,7 @@ from torch.nn import functional as F
 from contextlib import nullcontext
 import uuid
 from cosyvoice.utils.common import fade_in_out
-from cosyvoice.utils.file_utils import convert_onnx_to_trt, export_cosyvoice2_vllm, logging
+from cosyvoice.utils.file_utils import convert_onnx_to_trt, export_cosyvoice2_vllm, export_flow_decoder_estimator_onnx, logging
 from cosyvoice.utils.common import TrtContextWrapper
 
 
@@ -87,6 +87,10 @@ class CosyVoiceModel:
 
     def load_trt(self, flow_decoder_estimator_model, flow_decoder_onnx_model, trt_concurrent, fp16):
         assert torch.cuda.is_available(), 'tensorrt only supports gpu!'
+        # Export ONNX if not exists
+        if not os.path.exists(flow_decoder_onnx_model) or os.path.getsize(flow_decoder_onnx_model) == 0:
+            export_flow_decoder_estimator_onnx(self.flow.decoder.estimator, flow_decoder_onnx_model, self.device)
+        # Convert ONNX to TRT if not exists
         if not os.path.exists(flow_decoder_estimator_model) or os.path.getsize(flow_decoder_estimator_model) == 0:
             convert_onnx_to_trt(flow_decoder_estimator_model, self.get_trt_kwargs(), flow_decoder_onnx_model, fp16)
         del self.flow.decoder.estimator
@@ -97,10 +101,12 @@ class CosyVoiceModel:
         self.flow.decoder.estimator = TrtContextWrapper(estimator_engine, trt_concurrent=trt_concurrent, device=self.device)
 
     def get_trt_kwargs(self):
-        min_shape = [(2, 80, 4), (2, 1, 4), (2, 80, 4), (2, 80, 4)]
-        opt_shape = [(2, 80, 500), (2, 1, 500), (2, 80, 500), (2, 80, 500)]
-        max_shape = [(2, 80, 3000), (2, 1, 3000), (2, 80, 3000), (2, 80, 3000)]
-        input_names = ["x", "mask", "mu", "cond"]
+        # Must match export_onnx.py input order and forward_estimator bindings:
+        # x, mask, mu, t, spks, cond
+        min_shape = [(2, 80, 4), (2, 1, 4), (2, 80, 4), (2,), (2, 80), (2, 80, 4)]
+        opt_shape = [(2, 80, 500), (2, 1, 500), (2, 80, 500), (2,), (2, 80), (2, 80, 500)]
+        max_shape = [(2, 80, 3000), (2, 1, 3000), (2, 80, 3000), (2,), (2, 80), (2, 80, 3000)]
+        input_names = ["x", "mask", "mu", "t", "spks", "cond"]
         return {'min_shape': min_shape, 'opt_shape': opt_shape, 'max_shape': max_shape, 'input_names': input_names}
 
     def llm_job(self, text, prompt_text, llm_prompt_speech_token, llm_embedding, uuid):

@@ -286,6 +286,7 @@ class CausalMaskedDiffWithDiT(torch.nn.Module):
                  only_mask_loss: bool = True,
                  token_mel_ratio: int = 2,
                  pre_lookahead_len: int = 3,
+                 n_timesteps: int = 10,
                  pre_lookahead_layer: torch.nn.Module = None,
                  decoder: torch.nn.Module = None,
                  decoder_conf: Dict = {'in_channels': 240, 'out_channel': 80, 'spk_emb_dim': 80, 'n_spks': 1,
@@ -300,10 +301,10 @@ class CausalMaskedDiffWithDiT(torch.nn.Module):
         self.vocab_size = vocab_size
         self.output_type = output_type
         self.input_frame_rate = input_frame_rate
-        logging.info(f"input frame rate={self.input_frame_rate}")
         self.input_embedding = nn.Embedding(vocab_size, input_size)
         self.spk_embed_affine_layer = torch.nn.Linear(spk_embed_dim, output_size)
         self.pre_lookahead_len = pre_lookahead_len
+        self.n_timesteps = n_timesteps
         self.pre_lookahead_layer = pre_lookahead_layer
         self.decoder = decoder
         self.only_mask_loss = only_mask_loss
@@ -395,7 +396,7 @@ class CausalMaskedDiffWithDiT(torch.nn.Module):
             mask=mask.unsqueeze(1),
             spks=embedding,
             cond=conds,
-            n_timesteps=10,
+            n_timesteps=self.n_timesteps,
             streaming=streaming
         )
         feat = feat[:, :, mel_len1:]

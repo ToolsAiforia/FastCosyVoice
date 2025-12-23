@@ -26,12 +26,12 @@ from cosyvoice.cli.cosyvoice import AutoModel
 from cosyvoice.utils.file_utils import logging
 from cosyvoice.utils.common import set_all_random_seed
 
-inference_mode_list = ['预训练音色', '3s极速复刻', '跨语种复刻', '自然语言控制']
-instruct_dict = {'预训练音色': '1. 选择预训练音色\n2. 点击生成音频按钮',
-                 '3s极速复刻': '1. 选择prompt音频文件，或录入prompt音频，注意不超过30s，若同时提供，优先选择prompt音频文件\n2. 输入prompt文本\n3. 点击生成音频按钮',
-                 '跨语种复刻': '1. 选择prompt音频文件，或录入prompt音频，注意不超过30s，若同时提供，优先选择prompt音频文件\n2. 点击生成音频按钮',
-                 '自然语言控制': '1. 选择预训练音色\n2. 输入instruct文本\n3. 点击生成音频按钮'}
-stream_mode_list = [('否', False), ('是', True)]
+inference_mode_list = ['Pretrained Voice', '3s Fast Clone', 'Cross-lingual Clone', 'Natural Language Control']
+instruct_dict = {'Pretrained Voice': '1. Select a pretrained voice\n2. Click the generate audio button',
+                 '3s Fast Clone': '1. Select a prompt audio file, or record a prompt audio (note: not exceeding 30s, if both are provided, the prompt audio file takes priority)\n2. Enter prompt text\n3. Click the generate audio button',
+                 'Cross-lingual Clone': '1. Select a prompt audio file, or record a prompt audio (note: not exceeding 30s, if both are provided, the prompt audio file takes priority)\n2. Click the generate audio button',
+                 'Natural Language Control': '1. Select a pretrained voice\n2. Enter instruct text\n3. Click the generate audio button'}
+stream_mode_list = [('No', False), ('Yes', True)]
 max_val = 0.8
 
 
@@ -56,60 +56,60 @@ def generate_audio(tts_text, mode_checkbox_group, sft_dropdown, prompt_text, pro
     else:
         prompt_wav = None
     # if instruct mode, please make sure that model is iic/CosyVoice-300M-Instruct and not cross_lingual mode
-    if mode_checkbox_group in ['自然语言控制']:
+    if mode_checkbox_group in ['Natural Language Control']:
         if cosyvoice.instruct is False:
-            gr.Warning('您正在使用自然语言控制模式, {}模型不支持此模式, 请使用iic/CosyVoice-300M-Instruct模型'.format(args.model_dir))
+            gr.Warning('You are using Natural Language Control mode, {} model does not support this mode, please use iic/CosyVoice-300M-Instruct model'.format(args.model_dir))
             yield (cosyvoice.sample_rate, default_data)
         if instruct_text == '':
-            gr.Warning('您正在使用自然语言控制模式, 请输入instruct文本')
+            gr.Warning('You are using Natural Language Control mode, please enter instruct text')
             yield (cosyvoice.sample_rate, default_data)
         if prompt_wav is not None or prompt_text != '':
-            gr.Info('您正在使用自然语言控制模式, prompt音频/prompt文本会被忽略')
+            gr.Info('You are using Natural Language Control mode, prompt audio/prompt text will be ignored')
     # if cross_lingual mode, please make sure that model is iic/CosyVoice-300M and tts_text prompt_text are different language
-    if mode_checkbox_group in ['跨语种复刻']:
+    if mode_checkbox_group in ['Cross-lingual Clone']:
         if cosyvoice.instruct is True:
-            gr.Warning('您正在使用跨语种复刻模式, {}模型不支持此模式, 请使用iic/CosyVoice-300M模型'.format(args.model_dir))
+            gr.Warning('You are using Cross-lingual Clone mode, {} model does not support this mode, please use iic/CosyVoice-300M model'.format(args.model_dir))
             yield (cosyvoice.sample_rate, default_data)
         if instruct_text != '':
-            gr.Info('您正在使用跨语种复刻模式, instruct文本会被忽略')
+            gr.Info('You are using Cross-lingual Clone mode, instruct text will be ignored')
         if prompt_wav is None:
-            gr.Warning('您正在使用跨语种复刻模式, 请提供prompt音频')
+            gr.Warning('You are using Cross-lingual Clone mode, please provide prompt audio')
             yield (cosyvoice.sample_rate, default_data)
-        gr.Info('您正在使用跨语种复刻模式, 请确保合成文本和prompt文本为不同语言')
+        gr.Info('You are using Cross-lingual Clone mode, please ensure that the synthesis text and prompt text are in different languages')
     # if in zero_shot cross_lingual, please make sure that prompt_text and prompt_wav meets requirements
-    if mode_checkbox_group in ['3s极速复刻', '跨语种复刻']:
+    if mode_checkbox_group in ['3s Fast Clone', 'Cross-lingual Clone']:
         if prompt_wav is None:
-            gr.Warning('prompt音频为空，您是否忘记输入prompt音频？')
+            gr.Warning('Prompt audio is empty, did you forget to input prompt audio?')
             yield (cosyvoice.sample_rate, default_data)
         if torchaudio.info(prompt_wav).sample_rate < prompt_sr:
-            gr.Warning('prompt音频采样率{}低于{}'.format(torchaudio.info(prompt_wav).sample_rate, prompt_sr))
+            gr.Warning('Prompt audio sample rate {} is lower than {}'.format(torchaudio.info(prompt_wav).sample_rate, prompt_sr))
             yield (cosyvoice.sample_rate, default_data)
     # sft mode only use sft_dropdown
-    if mode_checkbox_group in ['预训练音色']:
+    if mode_checkbox_group in ['Pretrained Voice']:
         if instruct_text != '' or prompt_wav is not None or prompt_text != '':
-            gr.Info('您正在使用预训练音色模式，prompt文本/prompt音频/instruct文本会被忽略！')
+            gr.Info('You are using Pretrained Voice mode, prompt text/prompt audio/instruct text will be ignored!')
         if sft_dropdown == '':
-            gr.Warning('没有可用的预训练音色！')
+            gr.Warning('No available pretrained voices!')
             yield (cosyvoice.sample_rate, default_data)
     # zero_shot mode only use prompt_wav prompt text
-    if mode_checkbox_group in ['3s极速复刻']:
+    if mode_checkbox_group in ['3s Fast Clone']:
         if prompt_text == '':
-            gr.Warning('prompt文本为空，您是否忘记输入prompt文本？')
+            gr.Warning('Prompt text is empty, did you forget to input prompt text?')
             yield (cosyvoice.sample_rate, default_data)
         if instruct_text != '':
-            gr.Info('您正在使用3s极速复刻模式，预训练音色/instruct文本会被忽略！')
+            gr.Info('You are using 3s Fast Clone mode, pretrained voice/instruct text will be ignored!')
 
-    if mode_checkbox_group == '预训练音色':
+    if mode_checkbox_group == 'Pretrained Voice':
         logging.info('get sft inference request')
         set_all_random_seed(seed)
         for i in cosyvoice.inference_sft(tts_text, sft_dropdown, stream=stream, speed=speed):
             yield (cosyvoice.sample_rate, i['tts_speech'].numpy().flatten())
-    elif mode_checkbox_group == '3s极速复刻':
+    elif mode_checkbox_group == '3s Fast Clone':
         logging.info('get zero_shot inference request')
         set_all_random_seed(seed)
         for i in cosyvoice.inference_zero_shot(tts_text, prompt_text, prompt_wav, stream=stream, speed=speed):
             yield (cosyvoice.sample_rate, i['tts_speech'].numpy().flatten())
-    elif mode_checkbox_group == '跨语种复刻':
+    elif mode_checkbox_group == 'Cross-lingual Clone':
         logging.info('get cross_lingual inference request')
         set_all_random_seed(seed)
         for i in cosyvoice.inference_cross_lingual(tts_text, prompt_wav, stream=stream, speed=speed):
@@ -123,32 +123,32 @@ def generate_audio(tts_text, mode_checkbox_group, sft_dropdown, prompt_text, pro
 
 def main():
     with gr.Blocks() as demo:
-        gr.Markdown("### 代码库 [CosyVoice](https://github.com/FunAudioLLM/CosyVoice) \
-                    预训练模型 [CosyVoice-300M](https://www.modelscope.cn/models/iic/CosyVoice-300M) \
+        gr.Markdown("### Repository [CosyVoice](https://github.com/FunAudioLLM/CosyVoice) \
+                    Pretrained Models [CosyVoice-300M](https://www.modelscope.cn/models/iic/CosyVoice-300M) \
                     [CosyVoice-300M-Instruct](https://www.modelscope.cn/models/iic/CosyVoice-300M-Instruct) \
                     [CosyVoice-300M-SFT](https://www.modelscope.cn/models/iic/CosyVoice-300M-SFT)")
-        gr.Markdown("#### 请输入需要合成的文本，选择推理模式，并按照提示步骤进行操作")
+        gr.Markdown("#### Please enter the text to synthesize, select the inference mode, and follow the instructions")
 
-        tts_text = gr.Textbox(label="输入合成文本", lines=1, value="我是通义实验室语音团队全新推出的生成式语音大模型，提供舒适自然的语音合成能力。")
+        tts_text = gr.Textbox(label="Enter synthesis text", lines=1, value="I am a generative speech large model newly launched by the Tongyi Lab speech team, providing comfortable and natural speech synthesis capabilities.")
         with gr.Row():
-            mode_checkbox_group = gr.Radio(choices=inference_mode_list, label='选择推理模式', value=inference_mode_list[0])
-            instruction_text = gr.Text(label="操作步骤", value=instruct_dict[inference_mode_list[0]], scale=0.5)
-            sft_dropdown = gr.Dropdown(choices=sft_spk, label='选择预训练音色', value=sft_spk[0], scale=0.25)
-            stream = gr.Radio(choices=stream_mode_list, label='是否流式推理', value=stream_mode_list[0][1])
-            speed = gr.Number(value=1, label="速度调节(仅支持非流式推理)", minimum=0.5, maximum=2.0, step=0.1)
+            mode_checkbox_group = gr.Radio(choices=inference_mode_list, label='Select inference mode', value=inference_mode_list[0])
+            instruction_text = gr.Text(label="Instructions", value=instruct_dict[inference_mode_list[0]], scale=0.5)
+            sft_dropdown = gr.Dropdown(choices=sft_spk, label='Select pretrained voice', value=sft_spk[0], scale=0.25)
+            stream = gr.Radio(choices=stream_mode_list, label='Enable streaming inference', value=stream_mode_list[0][1])
+            speed = gr.Number(value=1, label="Speed adjustment (non-streaming only)", minimum=0.5, maximum=2.0, step=0.1)
             with gr.Column(scale=0.25):
                 seed_button = gr.Button(value="\U0001F3B2")
-                seed = gr.Number(value=0, label="随机推理种子")
+                seed = gr.Number(value=0, label="Random inference seed")
 
         with gr.Row():
-            prompt_wav_upload = gr.Audio(sources='upload', type='filepath', label='选择prompt音频文件，注意采样率不低于16khz')
-            prompt_wav_record = gr.Audio(sources='microphone', type='filepath', label='录制prompt音频文件')
-        prompt_text = gr.Textbox(label="输入prompt文本", lines=1, placeholder="请输入prompt文本，需与prompt音频内容一致，暂时不支持自动识别...", value='')
-        instruct_text = gr.Textbox(label="输入instruct文本", lines=1, placeholder="请输入instruct文本.", value='')
+            prompt_wav_upload = gr.Audio(sources='upload', type='filepath', label='Select prompt audio file (note: sample rate should be at least 16kHz)')
+            prompt_wav_record = gr.Audio(sources='microphone', type='filepath', label='Record prompt audio file')
+        prompt_text = gr.Textbox(label="Enter prompt text", lines=1, placeholder="Please enter prompt text, which should match the prompt audio content. Automatic recognition is not supported yet...", value='')
+        instruct_text = gr.Textbox(label="Enter instruct text", lines=1, placeholder="Please enter instruct text.", value='')
 
-        generate_button = gr.Button("生成音频")
+        generate_button = gr.Button("Generate Audio")
 
-        audio_output = gr.Audio(label="合成音频", autoplay=True, streaming=True)
+        audio_output = gr.Audio(label="Synthesized Audio", autoplay=True, streaming=True)
 
         seed_button.click(generate_seed, inputs=[], outputs=seed)
         generate_button.click(generate_audio,
@@ -167,7 +167,7 @@ if __name__ == '__main__':
                         default=8000)
     parser.add_argument('--model_dir',
                         type=str,
-                        default='pretrained_models/CosyVoice3-0.5B',
+                        default='pretrained_models/Fun-CosyVoice3-0.5B',
                         help='local path or modelscope repo id')
     args = parser.parse_args()
     cosyvoice = AutoModel(model_dir=args.model_dir)

@@ -866,7 +866,7 @@ requires-dist = [
     { name = "lightning", specifier = ">=2.6.0" },
     { name = "matcha-tts", specifier = ">=0.0.7.2" },
     { name = "modelscope", specifier = ">=1.33.0" },
-    { name = "numpy", specifier = ">1.24.3,<2.0" },
+    { name = "numpy", specifier = ">1.25,<2.0" },
     { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "onnx", specifier = "==1.19.1" },
     { name = "onnxruntime-gpu", specifier = "==1.21.1" },

@@ -845,6 +845,7 @@ dependencies = [
     { name = "librosa" },
     { name = "lightning" },
     { name = "matcha-tts" },
+    { name = "modelscope" },
     { name = "numpy" },
     { name = "omegaconf" },
     { name = "onnx" },
@@ -864,6 +865,11 @@ dependencies = [
     { name = "x-transformers" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "fastcosyvoice" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "conformer", specifier = ">=0.3.2" },
@@ -875,6 +881,7 @@ requires-dist = [
     { name = "librosa", specifier = ">=0.11.0" },
     { name = "lightning", specifier = ">=2.6.0" },
     { name = "matcha-tts", specifier = ">=0.0.7" },
+    { name = "modelscope", specifier = ">=1.33.0" },
     { name = "numpy", specifier = "<2.0" },
     { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "onnx", specifier = "==1.19.1" },
@@ -891,6 +898,9 @@ requires-dist = [
     { name = "wget", specifier = ">=3.2" },
     { name = "x-transformers", specifier = ">=2.11.24" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "fastcosyvoice", editable = "." }]
 
 [[package]]
 name = "fastjsonschema"
@@ -2146,6 +2156,22 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/a9/80/19189ea605017473660e43762dc853d2797984b3c7bf30ce656099add30c/ml_dtypes-0.5.4-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:19b9a53598f21e453ea2fbda8aa783c20faff8e1eeb0d7ab899309a0053f1483", size = 5034975, upload-time = "2025-11-17T22:31:42.758Z" },
     { url = "https://files.pythonhosted.org/packages/b4/24/70bd59276883fdd91600ca20040b41efd4902a923283c4d6edcb1de128d2/ml_dtypes-0.5.4-cp311-cp311-win_amd64.whl", hash = "sha256:7c23c54a00ae43edf48d44066a7ec31e05fdc2eee0be2b8b50dd1903a1db94bb", size = 210742, upload-time = "2025-11-17T22:31:44.068Z" },
     { url = "https://files.pythonhosted.org/packages/a0/c9/64230ef14e40aa3f1cb254ef623bf812735e6bec7772848d19131111ac0d/ml_dtypes-0.5.4-cp311-cp311-win_arm64.whl", hash = "sha256:557a31a390b7e9439056644cb80ed0735a6e3e3bb09d67fd5687e4b04238d1de", size = 160709, upload-time = "2025-11-17T22:31:46.557Z" },
+]
+
+[[package]]
+name = "modelscope"
+version = "1.34.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "filelock" },
+    { name = "requests" },
+    { name = "setuptools" },
+    { name = "tqdm" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f4/89/7a13bf70090e631f81a943797e875272d19d47e0a6984eda0a5a3f04e7e3/modelscope-1.34.0.tar.gz", hash = "sha256:c3041af301334aa9ca3f66f5b23e11ca33a2bdf28cc415dcceb75f68e4732aac", size = 4560273, upload-time = "2026-01-19T02:50:23.274Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/46/df/2c112a7c4160aa5e74dad87060019be5eca197d910af3f5b12e68ec090a9/modelscope-1.34.0-py3-none-any.whl", hash = "sha256:4629ace145972520b71b0ad02e4604282426c0cfae6a4b0922509898f3b269c8", size = 6050825, upload-time = "2026-01-19T02:50:20.018Z" },
 ]
 
 [[package]]

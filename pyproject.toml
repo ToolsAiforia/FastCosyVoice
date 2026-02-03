@@ -2,9 +2,8 @@
 requires = ["setuptools>=61.0", "setuptools-git-versioning<2", "cython"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["cosyvoice*", "fastcosyvoice*"]
+[tool.setuptools]
+packages = ["cosyvoice", "fastcosyvoice"]
 
 [project]
 name = "fastcosyvoice"
@@ -22,7 +21,7 @@ dependencies = [
     "librosa>=0.11.0",
     "lightning>=2.6.0",
     "matcha-tts>=0.0.7",
-    # "modelscope>=1.33.0",
+    "modelscope>=1.33.0",
     "numpy<2.0",
     "omegaconf>=2.3.0",
     "onnx==1.19.1",
@@ -42,6 +41,12 @@ dependencies = [
     "x-transformers>=2.11.24",
 ]
 
+[dependency-groups]
+dev = [
+    "fastcosyvoice",
+]
+
+
 [tool.hatch.build.targets.wheel]
 packages = ["cosyvoice", "fastcosyvoice"]
 
@@ -60,3 +65,13 @@ torch = { index = "pytorch-cu128" }
 torchaudio = { index = "pytorch-cu128" }
 torchvision = { index = "pytorch-cu128" }
 tensorrt-llm = { index = "nvidia" }
+fastcosyvoice = { workspace = true }
+
+[tool.uv.workspace]
+members = [
+    ".",
+    ".",
+    ".",
+    ".",
+]
+

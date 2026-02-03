@@ -41,15 +41,13 @@ dependencies = [
     "wetext>=0.1.2",
     "wget>=3.2",
     "x-transformers>=2.11.24",
+    "s3tokenizer",
 ]
 
 [dependency-groups]
 dev = [
     "fastcosyvoice",
 ]
-
-[tool.hatch.build.targets.wheel]
-packages = ["cosyvoice", "fastcosyvoice"]
 
 [[tool.uv.index]]
 url = "https://pypi.nvidia.com/"

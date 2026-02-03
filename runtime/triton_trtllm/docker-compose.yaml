@@ -18,8 +18,8 @@ services:
               capabilities: [gpu]
     volumes:
       - ./model_repo_cosyvoice2:/model_repo
-      - ./CosyVoice2-0.5B:/workspace/CosyVoice/runtime/triton_trtllm/CosyVoice2-0.5B
-      - ./cosyvoice2_llm:/workspace/CosyVoice/runtime/triton_trtllm/cosyvoice2_llm
+      - ./CosyVoice2-0.5B:/workspace/CosyVoice2-0.5B
+      - ./cosyvoice2_llm:/workspace/cosyvoice2_llm
     command:
       - tritonserver
       - --model-repository=/model_repo

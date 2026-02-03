@@ -1,6 +1,10 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=61.0", "setuptools-git-versioning<2", "cython"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cosyvoice*", "fastcosyvoice*"]
 
 [project]
 name = "fastcosyvoice"
@@ -17,9 +21,9 @@ dependencies = [
     "inflect>=7.5.0",
     "librosa>=0.11.0",
     "lightning>=2.6.0",
-    # "matcha-tts>=0.0.7",
+    "matcha-tts>=0.0.7",
     # "modelscope>=1.33.0",
-    "numpy>1.25,<2.0",
+    "numpy<2.0",
     "omegaconf>=2.3.0",
     "onnx==1.19.1",
     # "onnxruntime==1.21.1",

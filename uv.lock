@@ -1161,6 +1161,7 @@ dependencies = [
     { name = "conformer" },
     { name = "diffusers" },
     { name = "hydra-core" },
+    { name = "hyperpyyaml" },
     { name = "inflect" },
     { name = "librosa" },
     { name = "matcha-tts" },
@@ -1168,6 +1169,7 @@ dependencies = [
     { name = "numpy" },
     { name = "onnx" },
     { name = "onnxruntime-gpu" },
+    { name = "openai-whisper" },
     { name = "pyworld" },
     { name = "s3tokenizer" },
     { name = "silero-stress" },
@@ -1186,10 +1188,8 @@ dependencies = [
 dev = [
     { name = "fastcosyvoice" },
     { name = "gdown" },
-    { name = "hyperpyyaml" },
     { name = "lightning" },
     { name = "omegaconf" },
-    { name = "openai-whisper" },
     { name = "tensorrt-llm" },
     { name = "wget" },
 ]
@@ -1199,6 +1199,7 @@ requires-dist = [
     { name = "conformer", specifier = "~=0.3" },
     { name = "diffusers", specifier = "~=0.36" },
     { name = "hydra-core", specifier = "~=1.3" },
+    { name = "hyperpyyaml", specifier = "~=1.2" },
     { name = "inflect", specifier = "~=7.5" },
     { name = "librosa", specifier = "~=0.11" },
     { name = "matcha-tts", specifier = "~=0.0.7" },
@@ -1206,6 +1207,7 @@ requires-dist = [
     { name = "numpy", specifier = "<2.0" },
     { name = "onnx", specifier = "~=1.19" },
     { name = "onnxruntime-gpu", specifier = "~=1.21" },
+    { name = "openai-whisper", specifier = ">=20250625" },
     { name = "pyworld", specifier = "~=0.3" },
     { name = "s3tokenizer" },
     { name = "silero-stress", specifier = "~=1.3" },
@@ -1222,10 +1224,8 @@ requires-dist = [
 dev = [
     { name = "fastcosyvoice", editable = "." },
     { name = "gdown", specifier = "~=5.2" },
-    { name = "hyperpyyaml", specifier = "~=1.2" },
     { name = "lightning", specifier = "~=2.6" },
     { name = "omegaconf", specifier = "~=2.3" },
-    { name = "openai-whisper", specifier = ">=20250625" },
     { name = "tensorrt-llm", specifier = "==1.0.0", index = "https://pypi.nvidia.com/" },
     { name = "wget", specifier = "~=3.2" },
 ]

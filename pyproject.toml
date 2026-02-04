@@ -35,13 +35,13 @@ dependencies = [
     "wetext~=0.1.2",
     "x-transformers>=2.11.24",
     "s3tokenizer",
+    "hyperpyyaml~=1.2",
+    "openai-whisper>=20250625",
 ]
 
 [dependency-groups]
 dev = [
     "gdown~=5.2",
-    "hyperpyyaml~=1.2",
-    "openai-whisper>=20250625",
     "fastcosyvoice",
     "tensorrt-llm==1.0.0",
     "omegaconf~=2.3",

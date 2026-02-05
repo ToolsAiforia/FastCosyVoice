@@ -1,9 +1,9 @@
 stop:
-	@docker compose stop tts
+	@docker compose stop
 down:
-	@docker compose down tts
+	@docker compose down
 build:
-	@docker compose build tts
+	@docker compose build
 
 run: stop down build
 	@docker compose up -d --remove-orphans tts
@@ -11,5 +11,5 @@ run: stop down build
 logs:
 	@docker compose logs -f tts
 
-trt:
+trt: stop down build
 	@docker compose up trt

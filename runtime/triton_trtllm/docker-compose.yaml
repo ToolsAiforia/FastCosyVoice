@@ -1,16 +1,13 @@
 services:
   trt:
-    build: .
-    environment:
-      - PUID=1000
-      - PGID=1000
+    image: nvcr.io/nvidia/tensorrt-llm/release:0.20.0
     shm_size: '1gb'
     volumes:
-      - ./run.sh:/workspace/run.sh
-      - ./scripts:/workspace/scripts
-      - ./CosyVoice2-0.5B:/workspace/CosyVoice2-0.5B
-      - ./cosyvoice2_llm:/workspace/cosyvoice2_llm
-      - ./trt_engines_bfloat16/:/workspace/trt_engines_bfloat16/
+      - ./run.sh:/app/tensorrt_llm/run.sh
+      - ./scripts:/app/tensorrt_llm/scripts
+      - ./CosyVoice2-0.5B:/app/tensorrt_llm/CosyVoice2-0.5B
+      - ./cosyvoice2_llm:/app/tensorrt_llm/cosyvoice2_llm
+      - ./trt_engines_bfloat16/:/app/tensorrt_llm/trt_engines_bfloat16/
     command:
       - bash
       - run.sh
@@ -40,11 +37,6 @@ services:
             - driver: nvidia
               device_ids: ['0']
               capabilities: [gpu]
-    volumes:
-      - ./model_repo_cosyvoice2:/model_repo
-      - ./CosyVoice2-0.5B:/workspace/CosyVoice2-0.5B
-      - ./cosyvoice2_llm:/workspace/cosyvoice2_llm
-      - ./trt_engines_bfloat16:/workspace/trt_engines_bfloat16
     command:
       - tritonserver
       - --model-repository=/model_repo

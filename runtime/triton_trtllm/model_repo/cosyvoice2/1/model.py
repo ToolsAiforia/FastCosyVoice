@@ -46,7 +46,7 @@ ORIGINAL_VOCAB_SIZE = 151663
 torch.set_num_threads(1)
 
 def read_wav_into_numpy(audio_path: Path):
-    with Path(audio_path).open("ro") as f:
+    with Path(audio_path).open("rb") as f:
         f.read(44)
         raw_pcm = f.read()
 
@@ -349,12 +349,15 @@ class TritonPythonModel:
             # Extract input tensors
             wav = pb_utils.get_input_tensor_by_name(request, "reference_wav")
 
+            if wav is not None:
+                wav_len = pb_utils.get_input_tensor_by_name(request, "reference_wav_len")
+
             if not wav and self._reference_wav is not None:
-                wav = self._reference_wav
+                wav = pb_utils.Tensor("reference_wav", self._reference_wav)
+                wav_len = pb_utils.Tensor("reference_wav_len", self._reference_wav.shape[-1])
 
             # Process reference audio through audio tokenizer
             if wav is not None:
-                wav_len = pb_utils.get_input_tensor_by_name(request, "reference_wav_len")
                 prompt_speech_tokens = self.forward_audio_tokenizer(wav, wav_len)
                 prompt_speech_tokens = prompt_speech_tokens.unsqueeze(0)
 

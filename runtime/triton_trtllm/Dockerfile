@@ -14,7 +14,7 @@ RUN uv pip install \
 
 RUN --mount=type=ssh uv pip install \
   --system --break-system-packages --no-cache-dir --no-build-isolation \
-  git+https://github.com/ToolsAiforia/FastCosyVoice@aeb3a11fa614fb3b7e1299e38aed08c00f3286d6
+  "git+https://github.com/ToolsAiforia/FastCosyVoice@v0.0.1"
 
 RUN pip uninstall onnxruntime onnxruntime-gpu -y && \
     uv pip install --system --break-system-packages --no-cache-dir onnxruntime-gpu>=1.17 
@@ -26,3 +26,4 @@ ADD ./model_repo_cosyvoice2 /model_repo
 ADD ./CosyVoice2-0.5B /workspace/CosyVoice2-0.5B
 ADD ./cosyvoice2_llm /workspace/cosyvoice2_llm
 ADD ./trt_engines_bfloat16 /workspace/trt_engines_bfloat16
+ADD reference.wav /workspace/reference.wav

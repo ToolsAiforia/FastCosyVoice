@@ -55,7 +55,7 @@ def read_wav_into_numpy(audio_path: Path):
         dtype=np.int16,
         count=len(raw_pcm) // 2,
     )
-    return audio_np16.astype(np.float32) / 32767
+    return np.array([audio_np16]).astype(np.float32) / 32767
 
 
 
@@ -354,7 +354,7 @@ class TritonPythonModel:
 
             if not wav and self._reference_wav is not None:
                 wav = pb_utils.Tensor("reference_wav", self._reference_wav)
-                wav_len = pb_utils.Tensor("reference_wav_len", self._reference_wav.shape[-1])
+                wav_len = pb_utils.Tensor("reference_wav_len", np.array([[self._reference_wav.shape[-1]]], dtype=np.int32))
 
             # Process reference audio through audio tokenizer
             if wav is not None:

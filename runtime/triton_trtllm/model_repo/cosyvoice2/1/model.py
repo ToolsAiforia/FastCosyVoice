@@ -28,12 +28,14 @@ import json
 import os
 import threading
 import time
+from pathlib import Path
 
 import numpy as np
 import torch
 from torch.utils.dlpack import from_dlpack, to_dlpack
 import triton_python_backend_utils as pb_utils
 from transformers import AutoTokenizer
+
 
 import torchaudio
 
@@ -42,6 +44,19 @@ from matcha.utils.audio import mel_spectrogram
 
 ORIGINAL_VOCAB_SIZE = 151663
 torch.set_num_threads(1)
+
+def read_wav_into_numpy(audio_path: Path):
+    with Path(audio_path).open("ro") as f:
+        f.read(44)
+        raw_pcm = f.read()
+
+    audio_np16 = np.frombuffer(
+        raw_pcm,
+        dtype=np.int16,
+        count=len(raw_pcm) // 2,
+    )
+    return audio_np16.astype(np.float32) / 32767
+
 
 
 class TritonPythonModel:
@@ -84,6 +99,13 @@ class TritonPythonModel:
             raise ValueError(f"spk2info.pt not found in {model_params['model_dir']}")
         spk_info = torch.load(spk_info_path, map_location="cpu", weights_only=False)
         self.default_spk_info = spk_info["001"]
+    
+        self._reference_wav = None
+        if not Path("reference.wav").exists():
+            return
+
+        self._reference_wav = read_wav_into_numpy("reference.wav")
+
 
     def forward_llm(self, input_ids):
         """
@@ -326,6 +348,9 @@ class TritonPythonModel:
             request_id = request.request_id()
             # Extract input tensors
             wav = pb_utils.get_input_tensor_by_name(request, "reference_wav")
+
+            if not wav and self._reference_wav is not None:
+                wav = self._reference_wav
 
             # Process reference audio through audio tokenizer
             if wav is not None:

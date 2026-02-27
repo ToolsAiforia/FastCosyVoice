@@ -47,6 +47,9 @@ async def forward_token2wav(
         requested_output_names=["waveform"],
         inputs=inputs_tensor,
         request_id=request_id,
+        preferred_memory=pb_utils.PreferredMemory(
+            pb_utils.TRITONSERVER_MEMORY_CPU,
+        ),
     )
 
     inference_response = await inference_request.async_exec()

@@ -6,13 +6,16 @@ import numpy as np
 def forward_audio_tokenizer(
     wav: NDArray[np.float32], wav_len: NDArray[np.int32],
 ) -> NDArray[np.int32]:
-    wav_tensor = pb_utils.Tensor("wav", wav)
-    wav_len_tensor = pb_utils.Tensor("wav_len", wav_len)
+    wav_tensor = pb_utils.Tensor("reference_wav", wav)
+    wav_len_tensor = pb_utils.Tensor("reference_wav_len", wav_len)
 
     inference_request = pb_utils.InferenceRequest(
         model_name="audio_tokenizer",
         requested_output_names=["prompt_speech_tokens"],
         inputs=[wav_tensor, wav_len_tensor],
+        preferred_memory=pb_utils.PreferredMemory(
+            pb_utils.TRITONSERVER_MEMORY_CPU,
+        ),
     )
 
     inference_response = inference_request.exec()

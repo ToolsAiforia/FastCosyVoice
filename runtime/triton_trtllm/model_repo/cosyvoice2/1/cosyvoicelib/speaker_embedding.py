@@ -8,6 +8,9 @@ def forward_speaker_embedding(wav: NDArray[np.float32]) -> NDArray[np.float16]:
         model_name="speaker_embedding",
         requested_output_names=["prompt_spk_embedding"],
         inputs=[pb_utils.Tensor("reference_wav", wav)],
+        preferred_memory=pb_utils.PreferredMemory(
+            pb_utils.TRITONSERVER_MEMORY_CPU,
+        ),
     )
 
     inference_response = inference_request.exec()

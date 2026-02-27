@@ -31,7 +31,7 @@ class LLM:
     def stream_infer(
         self,
         input_ids: NDArray[np.int32],
-    ) -> Generator[NDArray[np.int32]]:
+    ) -> Generator[NDArray[np.int32], None, None]:
         llm_request = self._prepare_llm_request(input_ids, streaming=True)
         llm_responses = llm_request.exec(decoupled=True)
 
@@ -41,7 +41,7 @@ class LLM:
     async def async_stream_infer(
         self,
         input_ids: NDArray[np.int32],
-    ) -> AsyncGenerator[NDArray[np.int32]]:
+    ) -> AsyncGenerator[NDArray[np.int32], None]:
         llm_request = self._prepare_llm_request(input_ids, streaming=True)
         llm_responses = llm_request.async_exec(decoupled=True)
         async for llm_response in llm_responses:
@@ -85,6 +85,9 @@ class LLM:
             model_name="tensorrt_llm",
             requested_output_names=["output_ids", "sequence_length"],
             inputs=input_tensor_list,
+            preferred_memory=pb_utils.PreferredMemory(
+                pb_utils.TRITONSERVER_MEMORY_CPU,
+            ),
         )
 
     def _process_response(self, llm_response: "pb_utils.InferenceResponse") -> NDArray[np.int32]:

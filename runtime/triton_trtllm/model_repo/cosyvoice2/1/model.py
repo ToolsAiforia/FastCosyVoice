@@ -96,7 +96,6 @@ class TritonPythonModel:
             request = requests[0]
             inputs = self._get_inputs(request)
             input_ids = self._llm.parse_input(
-                requess_id=inputs.request_id,
                 text=inputs.target_text,
                 prompt_text=inputs.reference_text,
                 prompt_speech_tokens=inputs.prompt.speech_tokens,
@@ -105,7 +104,7 @@ class TritonPythonModel:
 
             await self._run_decoupled(
                 response_sender=request.get_response_sender(),
-                request_id=input_ids.request_id,
+                request_id=inputs.request_id,
                 generated_ids_iter=generated_ids_iter,
                 prompt=inputs.prompt,
             )
@@ -195,7 +194,7 @@ class TritonPythonModel:
     ) -> "pb_utils.InferenceResponse":
         audio = await forward_token2wav(
             request_id,
-            generated_ids,
+            generated_ids[None],
             prompt.speech_tokens,
             prompt.speech_feat,
             prompt.spk_embedding,

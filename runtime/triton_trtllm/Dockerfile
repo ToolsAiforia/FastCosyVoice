@@ -19,11 +19,11 @@ RUN --mount=type=ssh uv pip install \
 RUN pip uninstall onnxruntime onnxruntime-gpu -y && \
     uv pip install --system --break-system-packages --no-cache-dir onnxruntime-gpu>=1.17 
 
-WORKDIR /workspace
+# WORKDIR /workspace files get overwritten by runpod
+WORKDIR /workdir
 
-
+ADD ./CosyVoice2-0.5B /workdir/CosyVoice2-0.5B
+ADD ./cosyvoice2_llm /workdir/cosyvoice2_llm
+ADD ./trt_engines_bfloat16 /workdir/trt_engines_bfloat16
+ADD reference.wav /workdir/reference.wav
 ADD ./model_repo_cosyvoice2 /model_repo
-ADD ./CosyVoice2-0.5B /workspace/CosyVoice2-0.5B
-ADD ./cosyvoice2_llm /workspace/cosyvoice2_llm
-ADD ./trt_engines_bfloat16 /workspace/trt_engines_bfloat16
-ADD reference.wav /workspace/reference.wav

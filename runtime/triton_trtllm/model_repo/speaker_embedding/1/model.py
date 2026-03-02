@@ -30,7 +30,6 @@ from torch.utils.dlpack import to_dlpack
 import triton_python_backend_utils as pb_utils
 
 import os
-import numpy as np
 import torchaudio.compliance.kaldi as kaldi
 from cosyvoice.utils.file_utils import convert_onnx_to_trt
 from cosyvoice.utils.common import TrtContextWrapper
@@ -51,7 +50,7 @@ class TritonPythonModel:
             args: Dictionary containing model configuration
         """
         # Parse model parameters
-        parameters = json.loads(args['model_config'])['parameters']
+        parameters = json.loads(args["model_config"])["parameters"]
         model_params = {k: v["string_value"] for k, v in parameters.items()}
 
         self.device = torch.device("cuda")
@@ -60,45 +59,67 @@ class TritonPythonModel:
         gpu = "l20"
         enable_trt = True
         if enable_trt:
-            self.load_spk_trt(f'{model_dir}/campplus.{gpu}.fp32.trt',
-                              f'{model_dir}/campplus.onnx',
-                              1,
-                              False)
+            self.load_spk_trt(
+                f"{model_dir}/campplus.{gpu}.fp32.trt",
+                f"{model_dir}/campplus.onnx",
+                1,
+                False,
+            )
         else:
-            campplus_model = f'{model_dir}/campplus.onnx'
+            campplus_model = f"{model_dir}/campplus.onnx"
             option = onnxruntime.SessionOptions()
-            option.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
+            option.graph_optimization_level = (
+                onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
+            )
             option.intra_op_num_threads = 1
-            self.spk_model = onnxruntime.InferenceSession(campplus_model, sess_options=option, providers=["CPUExecutionProvider"])
+            self.spk_model = onnxruntime.InferenceSession(
+                campplus_model, sess_options=option, providers=["CPUExecutionProvider"]
+            )
 
     def load_spk_trt(self, spk_model, spk_onnx_model, trt_concurrent=1, fp16=True):
         if not os.path.exists(spk_model) or os.path.getsize(spk_model) == 0:
             trt_kwargs = self.get_spk_trt_kwargs()
             convert_onnx_to_trt(spk_model, trt_kwargs, spk_onnx_model, fp16)
         import tensorrt as trt
-        with open(spk_model, 'rb') as f:
-            spk_engine = trt.Runtime(trt.Logger(trt.Logger.INFO)).deserialize_cuda_engine(f.read())
-        assert spk_engine is not None, 'failed to load trt {}'.format(spk_model)
-        self.spk_model = TrtContextWrapper(spk_engine, trt_concurrent=trt_concurrent, device=self.device)
+
+        with open(spk_model, "rb") as f:
+            spk_engine = trt.Runtime(
+                trt.Logger(trt.Logger.INFO)
+            ).deserialize_cuda_engine(f.read())
+        assert spk_engine is not None, "failed to load trt {}".format(spk_model)
+        self.spk_model = TrtContextWrapper(
+            spk_engine, trt_concurrent=trt_concurrent, device=self.device
+        )
 
     def get_spk_trt_kwargs(self):
         min_shape = [(1, 4, 80)]
         opt_shape = [(1, 500, 80)]
         max_shape = [(1, 3000, 80)]
         input_names = ["input"]
-        return {'min_shape': min_shape, 'opt_shape': opt_shape, 'max_shape': max_shape, 'input_names': input_names}
+        return {
+            "min_shape": min_shape,
+            "opt_shape": opt_shape,
+            "max_shape": max_shape,
+            "input_names": input_names,
+        }
 
     def _extract_spk_embedding(self, speech):
-        feat = kaldi.fbank(speech,
-                           num_mel_bins=80,
-                           dither=0,
-                           sample_frequency=16000)
+        feat = kaldi.fbank(speech, num_mel_bins=80, dither=0, sample_frequency=16000)
         spk_feat = feat - feat.mean(dim=0, keepdim=True)
 
         if isinstance(self.spk_model, onnxruntime.InferenceSession):
-            embedding = self.spk_model.run(
-                None, {self.spk_model.get_inputs()[0].name: spk_feat.unsqueeze(dim=0).cpu().numpy()}
-            )[0].flatten().tolist()
+            embedding = (
+                self.spk_model.run(
+                    None,
+                    {
+                        self.spk_model.get_inputs()[0].name: spk_feat.unsqueeze(dim=0)
+                        .cpu()
+                        .numpy()
+                    },
+                )[0]
+                .flatten()
+                .tolist()
+            )
             embedding = torch.tensor([embedding]).to(self.device)
         else:
             [spk_model, stream], trt_engine = self.spk_model.acquire_estimator()
@@ -109,16 +130,24 @@ class TritonPythonModel:
                 batch_size = spk_feat.size(0)
 
                 with stream:
-                    spk_model.set_input_shape('input', (batch_size, spk_feat.size(1), 80))
+                    spk_model.set_input_shape(
+                        "input", (batch_size, spk_feat.size(1), 80)
+                    )
                     embedding = torch.empty((batch_size, 192), device=spk_feat.device)
 
-                    data_ptrs = [spk_feat.contiguous().data_ptr(),
-                                 embedding.contiguous().data_ptr()]
+                    data_ptrs = [
+                        spk_feat.contiguous().data_ptr(),
+                        embedding.contiguous().data_ptr(),
+                    ]
                     for i, j in enumerate(data_ptrs):
-
                         spk_model.set_tensor_address(trt_engine.get_tensor_name(i), j)
                     # run trt engine
-                    assert spk_model.execute_async_v3(torch.cuda.current_stream().cuda_stream) is True
+                    assert (
+                        spk_model.execute_async_v3(
+                            torch.cuda.current_stream().cuda_stream
+                        )
+                        is True
+                    )
                     torch.cuda.current_stream().synchronize()
                 self.spk_model.release_estimator(spk_model, stream)
 
@@ -138,15 +167,18 @@ class TritonPythonModel:
         for request in requests:
             # Extract input tensors
             wav_array = pb_utils.get_input_tensor_by_name(
-                request, "reference_wav").as_numpy()
+                request, "reference_wav"
+            ).as_numpy()
             wav_array = torch.from_numpy(wav_array).to(self.device)
 
             embedding = self._extract_spk_embedding(wav_array)
 
             prompt_spk_embedding_tensor = pb_utils.Tensor.from_dlpack(
-                "prompt_spk_embedding", to_dlpack(embedding))
+                "prompt_spk_embedding", to_dlpack(embedding)
+            )
             inference_response = pb_utils.InferenceResponse(
-                output_tensors=[prompt_spk_embedding_tensor])
+                output_tensors=[prompt_spk_embedding_tensor]
+            )
 
             responses.append(inference_response)
 

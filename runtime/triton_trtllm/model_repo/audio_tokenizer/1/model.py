@@ -30,8 +30,8 @@ from torch.utils.dlpack import to_dlpack
 import triton_python_backend_utils as pb_utils
 
 import os
-import numpy as np
 import s3tokenizer
+
 torch.set_num_threads(1)
 ORIGINAL_VOCAB_SIZE = 151663
 
@@ -50,7 +50,7 @@ class TritonPythonModel:
             args: Dictionary containing model configuration
         """
         # Parse model parameters
-        parameters = json.loads(args['model_config'])['parameters']
+        parameters = json.loads(args["model_config"])["parameters"]
         model_params = {k: v["string_value"] for k, v in parameters.items()}
 
         self.device = torch.device("cuda")
@@ -72,9 +72,13 @@ class TritonPythonModel:
         for request in requests:
             # Extract input tensors
             wav_array = pb_utils.get_input_tensor_by_name(
-                request, "reference_wav").as_numpy()
-            wav_len = pb_utils.get_input_tensor_by_name(
-                request, "reference_wav_len").as_numpy().item()
+                request, "reference_wav"
+            ).as_numpy()
+            wav_len = (
+                pb_utils.get_input_tensor_by_name(request, "reference_wav_len")
+                .as_numpy()
+                .item()
+            )
 
             wav_array = torch.from_numpy(wav_array).to(self.device)
             # Prepare inputs
@@ -82,16 +86,20 @@ class TritonPythonModel:
             mels.append(s3tokenizer.log_mel_spectrogram(wav))
 
         mels, mels_lens = s3tokenizer.padding(mels)
-        codes, codes_lens = self.audio_tokenizer.quantize(mels.to(self.device), mels_lens.to(self.device))
+        codes, codes_lens = self.audio_tokenizer.quantize(
+            mels.to(self.device), mels_lens.to(self.device)
+        )
         codes = codes.clone() + ORIGINAL_VOCAB_SIZE
 
         responses = []
         for i in range(len(requests)):
-            prompt_speech_tokens = codes[i, :codes_lens[i].item()]
+            prompt_speech_tokens = codes[i, : codes_lens[i].item()]
             prompt_speech_tokens_tensor = pb_utils.Tensor.from_dlpack(
-                "prompt_speech_tokens", to_dlpack(prompt_speech_tokens))
+                "prompt_speech_tokens", to_dlpack(prompt_speech_tokens)
+            )
             inference_response = pb_utils.InferenceResponse(
-                output_tensors=[prompt_speech_tokens_tensor])
+                output_tensors=[prompt_speech_tokens_tensor]
+            )
             responses.append(inference_response)
 
         return responses

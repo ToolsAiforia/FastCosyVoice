@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import NamedTuple, AsyncIterator
 from enum import StrEnum, auto
 import asyncio
+import concurrent.futures
 
 import numpy as np
 from numpy.typing import NDArray
@@ -87,47 +88,54 @@ class TritonPythonModel:
             " One loves horror movies, the other one hates horror movies. And so."
         )
         self._default_prompt: Prompt | None = None
+    
+        # Two thread pools so we don't run into situation where there is 
+        # 20 workers working on execute_decoupled and None are available for
+        # llm_gen thread.
+        self._thread_executor = concurrent.futures.ThreadPoolExecutor(max_workers=20) 
+        self._llm_thread_executor = concurrent.futures.ThreadPoolExecutor(max_workers=20) 
 
-    async def execute(
+    def execute(
         self,
         requests: list["pb_utils.InferenceRequest"],
     ) -> list["pb_utils.InferenceResponse"] | None:
         if self.decoupled:
             request = requests[0]
-            inputs = self._get_inputs(request)
-            input_ids = self._llm.parse_input(
-                text=inputs.target_text,
-                prompt_text=inputs.reference_text,
-                prompt_speech_tokens=inputs.prompt.speech_tokens,
-            )
-            generated_ids_iter = self._llm.async_stream_infer(input_ids)
+            self._thread_executor.submit(self._execute_decoupled, request)
+            return
 
-            await self._run_decoupled(
-                response_sender=request.get_response_sender(),
-                request_id=inputs.request_id,
-                generated_ids_iter=generated_ids_iter,
-                prompt=inputs.prompt,
-            )
-            return None
+        return [self._execute(request) for request in requests]
 
-        responses = []
-        for request in requests:
-            inputs = self._get_inputs(request)
-            input_ids = self._llm.parse_input(
-                text=inputs.target_text,
-                prompt_text=inputs.reference_text,
-                prompt_speech_tokens=inputs.prompt.speech_tokens,
-            )
-            generated_ids = await self._llm.async_infer(input_ids)
-            inference_response = await self._run(
-                request_id=inputs.request_id,
-                generated_ids=generated_ids,
-                prompt=inputs.prompt,
-            )
-            responses.append(inference_response)
+    def _execute(self, request: "pb_utils.InferenceRequest") -> "pb_utils.InferenceResponse":
+        inputs = self._get_inputs(request)
+        input_ids = self._llm.parse_input(
+            text=inputs.target_text,
+            prompt_text=inputs.reference_text,
+            prompt_speech_tokens=inputs.prompt.speech_tokens,
+        )
+        generated_ids = self._llm.infer(input_ids)
+        return self._run(
+            request_id=inputs.request_id,
+            generated_ids=generated_ids,
+            prompt=inputs.prompt,
+        )
 
-        return responses
+    def _execute_decoupled(self, request: "pb_utils.InferenceRequest") -> None:
+        inputs = self._get_inputs(request)
+        input_ids = self._llm.parse_input(
+            text=inputs.target_text,
+            prompt_text=inputs.reference_text,
+            prompt_speech_tokens=inputs.prompt.speech_tokens,
+        )
+        generated_ids_iter = self._llm.stream_infer(input_ids)
 
+        self._run_decoupled(
+            response_sender=request.get_response_sender(),
+            request_id=inputs.request_id,
+            generated_ids_iter=generated_ids_iter,
+            prompt=inputs.prompt,
+        )
+        return None
 
     def _get_inputs(self, request: "pb_utils.InferenceRequest") -> CosyVoiceInputs:
         if self._default_prompt is None:
@@ -192,7 +200,7 @@ class TritonPythonModel:
         generated_ids: NDArray[np.int32],
         prompt: Prompt,
     ) -> "pb_utils.InferenceResponse":
-        audio = await forward_token2wav(
+        audio = forward_token2wav(
             request_id,
             generated_ids[None],
             prompt.speech_tokens,
@@ -203,24 +211,32 @@ class TritonPythonModel:
         audio_tensor = pb_utils.Tensor("waveform", audio)
         return pb_utils.InferenceResponse(output_tensors=[audio_tensor])
 
-    async def _run_decoupled(
+    def _run_decoupled(
         self,
         request_id: str,
         response_sender,
-        generated_ids_iter: AsyncIterator[NDArray],
+        generated_ids_iter: AsyncIterator[NDArray[np.int32]],
         prompt: Prompt,
     ) -> None:
 
         semantic_token_ids_arr: list[int] = []
+
+        self._llm_thread_executor.submit(
+            self._llm_gen,
+            generated_ids_iter,
+            semantic_token_ids_arr,
+            llm_is_done_flag,
+        )
 
         token_offset, chunk_index = 0, 0
         start_time = time.time()
         this_token_hop_len = self.token_hop_len
         chunk_index = -1
 
-        async for generated_ids in generated_ids_iter:
-            semantic_token_ids_arr.extend(generated_ids.tolist())
+        while True:
             pending_num = len(semantic_token_ids_arr) - token_offset
+            if llm_is_done_flag[0]:
+                break
 
             if pending_num >= this_token_hop_len + self.flow_pre_lookahead_len:
                 chunk_index += 1
@@ -229,7 +245,7 @@ class TritonPythonModel:
                 ]
                 this_tts_speech_token_np = np.array([this_tts_speech_token], dtype=np.int32)
 
-                sub_tts_speech = await forward_token2wav(
+                sub_tts_speech = forward_token2wav(
                     request_id=request_id,
                     target_speech_tokens=this_tts_speech_token_np,
                     prompt_speech_tokens=prompt.speech_tokens,
@@ -253,10 +269,10 @@ class TritonPythonModel:
                     start_time=start_time,
                 )
             else:
-                await asyncio.sleep(0.02)
+                time.sleep(0.02)
 
         this_tts_speech_token_np = np.array([this_tts_speech_token], dtype=np.int32)
-        sub_tts_speech = await forward_token2wav(
+        sub_tts_speech = forward_token2wav(
             request_id=request_id,
             target_speech_tokens=this_tts_speech_token_np,
             prompt_speech_tokens=prompt.speech_tokens,
@@ -269,6 +285,19 @@ class TritonPythonModel:
         inference_response = pb_utils.InferenceResponse(output_tensors=[audio_tensor])
         response_sender.send(inference_response)
         response_sender.send(flags=pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL)
+
+    def _llm_gen(
+        self,
+        generated_ids_iter: Iterator[NDArray[np.int32]],
+        semantic_token_ids_arr: list[str],
+        llm_is_done_flag: list[bool]
+    ) -> None:
+        for generated_ids in generated_ids_iter:
+            generated_ids = generated_ids.tolist()
+            if len(generated_ids) == 0:
+                break
+            semantic_token_ids_arr.extend(generated_ids)
+        llm_is_done_flag[0] = True
 
     def _get_next_token_hop_len(
         self,
@@ -305,3 +334,7 @@ class TritonPythonModel:
                 raise ValueError(
                     f"Unknown DynamicChunkStrategy: {self.dynamic_chunk_strategy}"
                 )
+
+    def finalize(self):
+        self._llm_thread_executor.shutdown()
+        self._thread_executor.shutdown()

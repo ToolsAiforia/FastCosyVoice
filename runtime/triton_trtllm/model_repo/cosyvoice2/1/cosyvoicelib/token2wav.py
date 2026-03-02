@@ -3,7 +3,7 @@ from numpy.typing import NDArray
 import triton_python_backend_utils as pb_utils
 
 
-async def forward_token2wav(
+def forward_token2wav(
     request_id: str,
     target_speech_tokens: NDArray[np.int32],
     prompt_speech_tokens: NDArray[np.int32],
@@ -52,7 +52,7 @@ async def forward_token2wav(
         ),
     )
 
-    inference_response = await inference_request.async_exec()
+    inference_response = inference_request.exec()
     if inference_response.has_error():
         raise pb_utils.TritonModelException(inference_response.error().message())
 

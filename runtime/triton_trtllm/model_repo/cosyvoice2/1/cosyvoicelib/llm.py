@@ -23,11 +23,6 @@ class LLM:
         llm_response = llm_request.exec()
         return self._process_response(llm_response)
 
-    async def async_infer(self, input_ids: NDArray[np.int32]) -> NDArray[np.int32]:
-        llm_request = self._prepare_llm_request(input_ids)
-        llm_response = await llm_request.async_exec()
-        return self._process_response(llm_response)
-
     def stream_infer(
         self,
         input_ids: NDArray[np.int32],
@@ -36,15 +31,6 @@ class LLM:
         llm_responses = llm_request.exec(decoupled=True)
 
         for llm_response in llm_responses:
-            yield self._process_response(llm_response)
-
-    async def async_stream_infer(
-        self,
-        input_ids: NDArray[np.int32],
-    ) -> AsyncGenerator[NDArray[np.int32], None]:
-        llm_request = self._prepare_llm_request(input_ids, streaming=True)
-        llm_responses = llm_request.async_exec(decoupled=True)
-        async for llm_response in llm_responses:
             yield self._process_response(llm_response)
 
     def parse_input(

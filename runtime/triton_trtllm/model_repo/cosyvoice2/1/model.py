@@ -1,7 +1,7 @@
 import json
 import time
 from pathlib import Path
-from typing import NamedTuple, AsyncIterator
+from typing import NamedTuple, Iterator
 from enum import StrEnum, auto
 import asyncio
 import concurrent.futures
@@ -55,17 +55,17 @@ def read_wav_into_numpy(audio_path: Path):
 
 class TritonPythonModel:
     def initialize(self, args):
-        self.logger = pb_utils.Logger
+        self._logger = pb_utils.Logger
         # Parse model parameters
         self.model_config = json.loads(args["model_config"])
         parameters = self.model_config["parameters"]
         model_params = {k: v["string_value"] for k, v in parameters.items()}
-        self.logger.log_info(f"model_params:{model_params}")
+        self._logger.log_info(f"model_params:{model_params}")
         self.dynamic_chunk_strategy = DynamicChunkStrategy(
             model_params.get("dynamic_chunk_strategy", "exponential"),
         )
 
-        self.logger.log_info(
+        self._logger.log_info(
             f"Using dynamic chunk strategy: {self.dynamic_chunk_strategy}"
         )
         llm_tokenizer_dir = model_params["llm_tokenizer_dir"]
@@ -91,7 +91,7 @@ class TritonPythonModel:
     
         # Two thread pools so we don't run into situation where there is 
         # 20 workers working on execute_decoupled and None are available for
-        # llm_gen thread.
+        # llm_gen thread which will lead to deadlock.
         self._thread_executor = concurrent.futures.ThreadPoolExecutor(max_workers=20) 
         self._llm_thread_executor = concurrent.futures.ThreadPoolExecutor(max_workers=20) 
 
@@ -148,19 +148,17 @@ class TritonPythonModel:
         ).as_numpy()
         target_text = target_text[0][0].decode("utf-8")
 
-        reference_text = pb_utils.get_input_tensor_by_name(
+        reference_text_tensor = pb_utils.get_input_tensor_by_name(
             request, "reference_text"
-        ).as_numpy()
-        reference_text = reference_text[0][0].decode("utf-8")
+        )
+        reference_text = self._reference_text
+        if reference_text_tensor is not None:
+            reference_text = reference_text_tensor.as_numpy[0][0].decode("utf-8")
 
         wav_tensor = pb_utils.get_input_tensor_by_name(request, "reference_wav")
         reference_wav = wav_tensor.as_numpy() if wav_tensor else None
-
-        if not reference_text:
-            reference_text = self._reference_text
-
+        
         prompt = self._default_prompt
-
         if reference_wav is not None:
             prompt = self._prepare_reference(reference_wav)
 
@@ -215,11 +213,11 @@ class TritonPythonModel:
         self,
         request_id: str,
         response_sender,
-        generated_ids_iter: AsyncIterator[NDArray[np.int32]],
+        generated_ids_iter: Iterator[NDArray[np.int32]],
         prompt: Prompt,
     ) -> None:
-
         semantic_token_ids_arr: list[int] = []
+        llm_is_done_flag = [False]
 
         self._llm_thread_executor.submit(
             self._llm_gen,
@@ -271,7 +269,7 @@ class TritonPythonModel:
             else:
                 time.sleep(0.02)
 
-        this_tts_speech_token_np = np.array([this_tts_speech_token], dtype=np.int32)
+        this_tts_speech_token_np = np.array([semantic_token_ids_arr], dtype=np.int32)
         sub_tts_speech = forward_token2wav(
             request_id=request_id,
             target_speech_tokens=this_tts_speech_token_np,
@@ -283,8 +281,7 @@ class TritonPythonModel:
         )
         audio_tensor = pb_utils.Tensor("waveform", sub_tts_speech)
         inference_response = pb_utils.InferenceResponse(output_tensors=[audio_tensor])
-        response_sender.send(inference_response)
-        response_sender.send(flags=pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL)
+        response_sender.send(inference_response, flags=pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL)
 
     def _llm_gen(
         self,

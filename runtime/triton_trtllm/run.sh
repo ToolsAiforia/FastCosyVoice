@@ -7,13 +7,13 @@ export PYTHONPATH=${cosyvoice_path}/third_party/Matcha-TTS:$PYTHONPATH
 stage=$1
 stop_stage=$2
 
-huggingface_model_local_dir=./cosyvoice2_llm
-model_scope_model_local_dir=./CosyVoice2-0.5B
+huggingface_model_local_dir=./Fun-CosyVoice3-0.5B-2512
+model_scope_model_local_dir=./Fun-CosyVoice3-0.5B-2512
 trt_dtype=bfloat16
 trt_weights_dir=./trt_weights_${trt_dtype}
 trt_engines_dir=./trt_engines_${trt_dtype}
 
-model_repo=./model_repo_cosyvoice2
+model_repo=./model_repo_cosyvoice3
 
 use_spk2info_cache=False
 
@@ -26,12 +26,12 @@ if [ $stage -le -1 ] && [ $stop_stage -ge -1 ]; then
 fi
 
 if [ $stage -le 0 ] && [ $stop_stage -ge 0 ]; then
-    echo "Downloading CosyVoice2-0.5B"
+    echo "Downloading CosyVoice3-0.5B"
     # see https://github.com/nvidia-china-sae/mair-hub/blob/main/rl-tutorial/cosyvoice_llm/pretrained_to_huggingface.py
     huggingface-cli download --local-dir $huggingface_model_local_dir yuekai/cosyvoice2_llm
-    modelscope download --model iic/CosyVoice2-0.5B --local_dir $model_scope_model_local_dir
+    # modelscope download --model iic/CosyVoice2-0.5B --local_dir $model_scope_model_local_dir
     # download spk2info.pt to directly use cached speech tokens, speech feats, and embeddings
-    wget https://raw.githubusercontent.com/qi-hua/async_cosyvoice/main/CosyVoice2-0.5B/spk2info.pt -O $model_scope_model_local_dir/spk2info.pt
+    # wget https://raw.githubusercontent.com/qi-hua/async_cosyvoice/main/CosyVoice2-0.5B/spk2info.pt -O $model_scope_model_local_dir/spk2info.pt
 fi
 
 

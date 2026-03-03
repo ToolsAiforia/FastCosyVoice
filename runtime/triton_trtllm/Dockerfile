@@ -22,8 +22,9 @@ RUN pip uninstall onnxruntime onnxruntime-gpu -y && \
 # WORKDIR /workspace files get overwritten by runpod
 WORKDIR /workdir
 
-ADD ./CosyVoice2-0.5B /workdir/CosyVoice2-0.5B
-ADD ./cosyvoice2_llm /workdir/cosyvoice2_llm
+# ADD ./CosyVoice2-0.5B /workdir/CosyVoice2-0.5B
+# ADD ./cosyvoice2_llm /workdir/cosyvoice2_llm
+ADD ./Fun-CosyVoice3-0.5B /workdir/Fun-CosyVoice3-0.5B
 ADD ./trt_engines_bfloat16 /workdir/trt_engines_bfloat16
 ADD reference.wav /workdir/reference.wav
-ADD ./model_repo_cosyvoice2 /model_repo
+ADD ./model_repo_cosyvoice3 /model_repo

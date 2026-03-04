@@ -54,7 +54,7 @@ class TritonPythonModel:
         model_params = {k: v["string_value"] for k, v in parameters.items()}
 
         self.device = torch.device("cuda")
-        model_path = os.path.join(model_params["model_dir"], "speech_tokenizer_v2.onnx")
+        model_path = os.path.join(model_params["model_dir"], "speech_tokenizer_v3.onnx")
         self.audio_tokenizer = s3tokenizer.load_model(model_path).to(self.device)
 
     def execute(self, requests):

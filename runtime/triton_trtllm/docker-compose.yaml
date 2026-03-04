@@ -5,8 +5,7 @@ services:
     volumes:
       - ./run.sh:/app/tensorrt_llm/run.sh
       - ./scripts:/app/tensorrt_llm/scripts
-      - ./CosyVoice2-0.5B:/app/tensorrt_llm/CosyVoice2-0.5B
-      - ./cosyvoice2_llm:/app/tensorrt_llm/cosyvoice2_llm
+      - ./Fun-CosyVoice3-0.5B:/app/tensorrt_llm/Fun-CosyVoice3-0.5B
       - ./trt_engines_bfloat16/:/app/tensorrt_llm/trt_engines_bfloat16/
     command:
       - bash

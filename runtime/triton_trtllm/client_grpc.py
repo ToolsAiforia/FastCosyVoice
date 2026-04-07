@@ -282,7 +282,8 @@ def get_args():
             "f5_tts",
             "spark_tts",
             "cosyvoice2",
-            "cosyvoice2_dit"],
+            "cosyvoice2_dit",
+            "cosyvoice3"],
         help="triton model_repo module name to request",
     )
 

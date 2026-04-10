@@ -29,6 +29,10 @@ parameters [
   {
    key: "model_dir",
    value: {string_value:"${model_dir}"}
+  },
+  {
+   key: "llm_api_base",
+   value: {string_value:"LLM_API_BASE_PLACEHOLDER"}
   }
 ]
 
@@ -47,6 +51,12 @@ input [
   },
   {
     name: "reference_text"
+    data_type: TYPE_STRING
+    dims: [1]
+    optional: true
+  },
+  {
+    name: "speaker_name"
     data_type: TYPE_STRING
     dims: [1]
     optional: true

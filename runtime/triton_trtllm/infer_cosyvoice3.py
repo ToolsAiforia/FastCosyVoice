@@ -8,6 +8,8 @@
             --batch-size $batch_size --token2wav-batch-size $token2wav_batch_size \
             --engine-dir $trt_engines_dir \
             --split-name ${dataset} || exit 1
+            
+    
 """
 import argparse
 import json

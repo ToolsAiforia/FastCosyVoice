@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import time
 import asyncio
@@ -68,6 +69,30 @@ class TritonPythonModel:
 
         # Speaker cache to avoid redundant audio_tokenizer/speaker_embedding calls
         self.speaker_cache = {}
+        self.default_speaker_key = None
+        self.speaker_name_to_cache_key = {}
+
+        # Load pre-computed spk2info.pt if available
+        spk2info_path = os.path.join(model_params.get("model_dir", ""), "spk2info.pt")
+        if os.path.exists(spk2info_path):
+            self.logger.log_info(f"Loading spk2info from {spk2info_path}")
+            spk2info = torch.load(spk2info_path, map_location="cpu")
+            for spk_name, spk_data in spk2info.items():
+                cache_key = spk_data["reference_text"]
+                self.speaker_cache[cache_key] = {
+                    "prompt_speech_tokens_for_llm": spk_data["prompt_speech_tokens_for_llm"],
+                    "prompt_speech_tokens": spk_data["prompt_speech_tokens"],
+                    "prompt_speech_feat": spk_data["prompt_speech_feat"].to(self.device),
+                    "prompt_spk_embedding": spk_data["prompt_spk_embedding"].to(self.device),
+                }
+                self.speaker_name_to_cache_key[spk_name] = cache_key
+                if self.default_speaker_key is None:
+                    self.default_speaker_key = cache_key
+                self.logger.log_info(f"  Loaded speaker '{spk_name}' -> cache key: {cache_key[:60]}...")
+            self.logger.log_info(f"Loaded {len(spk2info)} speaker(s) from spk2info.pt")
+            self.logger.log_info(f"Available speaker names: {list(self.speaker_name_to_cache_key.keys())}")
+        else:
+            self.logger.log_info("No spk2info.pt found, speaker cache starts empty")
 
     def _convert_speech_tokens_to_str(self, speech_tokens):
         """Convert speech token IDs tensor/list to string like '<|s_N|>'."""
@@ -251,7 +276,26 @@ class TritonPythonModel:
         return torch.utils.dlpack.from_dlpack(speech.to_dlpack()).cpu()
 
     def _prepare_prompt(self, request):
-        """Extract reference audio, tokenize, compute speaker embedding and mel feat."""
+        """Extract reference audio, tokenize, compute speaker embedding and mel feat.
+
+        If reference_wav is not provided, falls back to the default speaker
+        from spk2info.pt (loaded at init).
+        """
+        # Check speaker_name first (highest priority)
+        speaker_name_tensor = pb_utils.get_input_tensor_by_name(request, "speaker_name")
+        if speaker_name_tensor is not None:
+            speaker_name = speaker_name_tensor.as_numpy()[0][0].decode('utf-8').strip()
+            if speaker_name:
+                if speaker_name not in self.speaker_name_to_cache_key:
+                    available = list(self.speaker_name_to_cache_key.keys())
+                    raise pb_utils.TritonModelException(
+                        f"Speaker '{speaker_name}' not found in spk2info.pt. "
+                        f"Available speakers: {available}")
+                cache_key = self.speaker_name_to_cache_key[speaker_name]
+                cached = self.speaker_cache[cache_key]
+                return (cached['prompt_speech_tokens_for_llm'], cached['prompt_speech_tokens'],
+                        cached['prompt_speech_feat'], cached['prompt_spk_embedding'], cache_key)
+
         wav = pb_utils.get_input_tensor_by_name(request, "reference_wav")
         wav_len = pb_utils.get_input_tensor_by_name(request, "reference_wav_len")
 
@@ -265,6 +309,18 @@ class TritonPythonModel:
             cached = self.speaker_cache[reference_text]
             return (cached['prompt_speech_tokens_for_llm'], cached['prompt_speech_tokens'],
                     cached['prompt_speech_feat'], cached['prompt_spk_embedding'], reference_text)
+
+        # No reference audio — use default speaker from spk2info.pt
+        if wav is None and self.default_speaker_key is not None:
+            cached = self.speaker_cache[self.default_speaker_key]
+            return (cached['prompt_speech_tokens_for_llm'], cached['prompt_speech_tokens'],
+                    cached['prompt_speech_feat'], cached['prompt_spk_embedding'],
+                    self.default_speaker_key)
+
+        if wav is None:
+            raise pb_utils.TritonModelException(
+                "No reference_wav provided and no spk2info.pt loaded. "
+                "Either send reference audio or generate spk2info.pt first.")
 
         # Audio tokenizer
         wav_np = wav.as_numpy()
@@ -286,8 +342,6 @@ class TritonPythonModel:
         prompt_speech_tokens_for_llm = prompt_speech_tokens.clone()
 
         # Align prompt speech feat and tokens to 2:1 ratio (for flow model only)
-        orig_feat_len = speech_feat.shape[1]
-        orig_token_len = prompt_speech_tokens.shape[-1]
         token_len = min(int(speech_feat.shape[1] / 2), prompt_speech_tokens.shape[-1])
         prompt_speech_feat = speech_feat[:, :2 * token_len].contiguous().half()
         prompt_speech_tokens = prompt_speech_tokens[:, :token_len].contiguous()

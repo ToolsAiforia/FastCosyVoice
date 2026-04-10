@@ -42,6 +42,27 @@ docker run -d --name cosyvoice3 \
 - `cosyvoice3_trt_engines/` — Pre-built TRT-LLM engine (~1.3GB)
 - `model_repo_cosyvoice3/` — Triton model repository configs
 
+Use the download script to fetch all model files:
+
+```sh
+cd runtime/triton_trtllm
+
+# Download models + build TRT-LLM engine (requires GPU + trtllm-build)
+bash download_cosyvoice3_models.sh
+
+# Download models only (build engine later inside container)
+bash download_cosyvoice3_models.sh --skip-build
+```
+
+The script downloads from HuggingFace:
+| Directory | HuggingFace Repository |
+|-----------|----------------------|
+| `Fun-CosyVoice3-0.5B-2512/` | `FunAudioLLM/Fun-CosyVoice3-0.5B-2512` + `yuekai/Fun-CosyVoice3-0.5B-2512-FP16-ONNX` |
+| `cosyvoice3_llm/` | `yuekai/Fun-CosyVoice3-0.5B-2512-LLM-HF` |
+| `cosyvoice3_trt_engines/` | Built from `cosyvoice3_llm/` via `trtllm-build` (GPU-specific) |
+
+> **Note:** TRT-LLM engines are GPU architecture-specific. If you use `--skip-build`, you must build the engine on the target GPU before running the Docker image.
+
 ### Configuration
 
 The entrypoint (`entrypoint_cosyvoice3.sh`) supports environment variables:

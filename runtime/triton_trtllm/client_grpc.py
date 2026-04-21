@@ -282,7 +282,8 @@ def get_args():
             "f5_tts",
             "spark_tts",
             "cosyvoice2",
-            "cosyvoice2_dit"],
+            "cosyvoice2_dit",
+            "cosyvoice3"],
         help="triton model_repo module name to request",
     )
 
@@ -337,11 +338,20 @@ def get_args():
         help="Use spk2info cache for reference audio.",
     )
 
+    parser.add_argument(
+        "--speaker-name",
+        type=str,
+        default=None,
+        help="Speaker name from spk2info.pt (e.g., 'emily'). Overrides reference audio.",
+    )
+
     return parser.parse_args()
 
 
 def load_audio(wav_path, target_sample_rate=16000):
     assert target_sample_rate == 16000, "hard coding in server"
+    if wav_path == "__dummy__":
+        return np.zeros(1, dtype=np.float32), target_sample_rate
     if isinstance(wav_path, dict):
         waveform = wav_path["array"]
         sample_rate = wav_path["sampling_rate"]
@@ -362,7 +372,8 @@ def prepare_request_input_output(
     target_text,
     sample_rate=16000,
     padding_duration: int = None,
-    use_spk2info_cache: bool = False
+    use_spk2info_cache: bool = False,
+    speaker_name: str = None,
 ):
     """Prepares inputs for Triton inference (offline or streaming)."""
     assert len(waveform.shape) == 1, "waveform should be 1D"
@@ -403,7 +414,12 @@ def prepare_request_input_output(
     inputs[3].set_data_from_numpy(input_data_numpy)
 
     outputs = [protocol_client.InferRequestedOutput("waveform")]
-    if use_spk2info_cache:
+    if speaker_name:
+        speaker_name_np = np.array([speaker_name], dtype=object).reshape((1, 1))
+        speaker_name_input = protocol_client.InferInput("speaker_name", [1, 1], "BYTES")
+        speaker_name_input.set_data_from_numpy(speaker_name_np)
+        inputs = [inputs[-1], speaker_name_input]  # target_text + speaker_name
+    elif use_spk2info_cache:
         inputs = inputs[-1:]
     return inputs, outputs
 
@@ -509,6 +525,7 @@ async def send_streaming(
     chunk_overlap_duration: float = 0.1,
     padding_duration: int = None,
     use_spk2info_cache: bool = False,
+    speaker_name: str = None,
 ):
     total_duration = 0.0
     latency_data = []
@@ -537,7 +554,8 @@ async def send_streaming(
                     target_text,
                     sample_rate,
                     padding_duration=padding_duration,
-                    use_spk2info_cache=use_spk2info_cache
+                    use_spk2info_cache=use_spk2info_cache,
+                    speaker_name=speaker_name,
                 )
 
                 request_id = str(uuid.uuid4())
@@ -602,6 +620,7 @@ async def send(
     audio_save_dir: str = "./",
     save_sample_rate: int = 16000,
     use_spk2info_cache: bool = False,
+    speaker_name: str = None,
 ):
     total_duration = 0.0
     latency_data = []
@@ -620,7 +639,8 @@ async def send(
             target_text,
             sample_rate,
             padding_duration=padding_duration,
-            use_spk2info_cache=use_spk2info_cache
+            use_spk2info_cache=use_spk2info_cache,
+            speaker_name=speaker_name,
         )
         sequence_id = 100000000 + i + task_id * 10
         start = time.time()
@@ -699,7 +719,18 @@ async def main():
     else:
         raise ValueError(f"Invalid mode: {args.mode}")
 
-    if args.reference_audio:
+    if args.speaker_name and not args.reference_audio:
+        args.num_tasks = 1
+        args.log_interval = 1
+        manifest_item_list = [
+            {
+                "reference_text": "",
+                "target_text": args.target_text,
+                "audio_filepath": "__dummy__",
+                "target_audio_path": "test",
+            }
+        ]
+    elif args.reference_audio:
         args.num_tasks = 1
         args.log_interval = 1
         manifest_item_list = [
@@ -762,6 +793,7 @@ async def main():
                     padding_duration=1,
                     save_sample_rate=16000 if args.model_name == "spark_tts" else 24000,
                     use_spk2info_cache=args.use_spk2info_cache,
+                    speaker_name=args.speaker_name,
                 )
             )
         elif args.mode == "streaming":
@@ -778,6 +810,7 @@ async def main():
                     save_sample_rate=16000 if args.model_name == "spark_tts" else 24000,
                     chunk_overlap_duration=args.chunk_overlap_duration,
                     use_spk2info_cache=args.use_spk2info_cache,
+                    speaker_name=args.speaker_name,
                 )
             )
         tasks.append(task)

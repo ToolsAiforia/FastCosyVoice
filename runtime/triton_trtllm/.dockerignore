@@ -1,0 +1,9 @@
+docker-build/
+**/__pycache__
+**/*.pyc
+**/.git
+**/.cache
+*.md
+*.log
+Emily_orig_24_part.wav
+synth_results/

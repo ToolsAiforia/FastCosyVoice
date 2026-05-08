@@ -66,6 +66,7 @@ class UserData:
         self._first_chunk_time = None
         self._second_chunk_time = None
         self._start_time = None
+        self._chunk_times = []
 
     def record_start_time(self):
         self._start_time = time.time()
@@ -83,10 +84,19 @@ class UserData:
 
 def callback(user_data, result, error):
     if not error:
-        if user_data._first_chunk_time is None:
-            user_data._first_chunk_time = time.time()
-        elif user_data._second_chunk_time is None:
-            user_data._second_chunk_time = time.time()
+        now = time.time()
+        has_audio = False
+        try:
+            audio_chunk = result.as_numpy("waveform")
+            has_audio = audio_chunk is not None and audio_chunk.size > 0
+        except Exception:
+            has_audio = False
+        if has_audio:
+            user_data._chunk_times.append(now)
+            if user_data._first_chunk_time is None:
+                user_data._first_chunk_time = now
+            elif user_data._second_chunk_time is None:
+                user_data._second_chunk_time = now
 
     if error:
         user_data._completed_requests.put(error)
@@ -345,6 +355,20 @@ def get_args():
         help="Speaker name from spk2info.pt (e.g., 'emily'). Overrides reference audio.",
     )
 
+    parser.add_argument(
+        "--max-samples",
+        type=int,
+        default=None,
+        help="Cap the dataset to the first N items before splitting across tasks.",
+    )
+
+    parser.add_argument(
+        "--warmup-requests",
+        type=int,
+        default=0,
+        help="Drop the first N requests per task from latency percentile aggregation.",
+    )
+
     return parser.parse_args()
 
 
@@ -453,7 +477,7 @@ def run_sync_streaming_inference(
             result = user_data._completed_requests.get(timeout=200)
             if isinstance(result, InferenceServerException):
                 print(f"Received InferenceServerException: {result}")
-                return None, None, None, None
+                return None, None, None, None, None
             response = result.get_response()
             final = response.parameters["triton_final_response"].bool_param
             if final is True:
@@ -467,12 +491,13 @@ def run_sync_streaming_inference(
 
         except queue.Empty:
             print(f"Timeout waiting for response for request id {request_id}")
-            return None, None, None, None
+            return None, None, None, None, None
 
     end_time_total = time.time()
     total_request_latency = end_time_total - start_time_total
     first_chunk_latency = user_data.get_first_chunk_latency()
     second_chunk_latency = user_data.get_second_chunk_latency()
+    chunk_times = list(user_data._chunk_times)
 
     if audios:
         if model_name == "spark_tts":
@@ -510,7 +535,7 @@ def run_sync_streaming_inference(
         print("Warning: No audio chunks received.")
         actual_duration = 0
 
-    return total_request_latency, first_chunk_latency, second_chunk_latency, actual_duration
+    return total_request_latency, first_chunk_latency, second_chunk_latency, actual_duration, chunk_times
 
 
 async def send_streaming(
@@ -526,6 +551,7 @@ async def send_streaming(
     padding_duration: int = None,
     use_spk2info_cache: bool = False,
     speaker_name: str = None,
+    warmup_requests: int = 0,
 ):
     total_duration = 0.0
     latency_data = []
@@ -563,7 +589,7 @@ async def send_streaming(
                 user_data_map[request_id] = user_data
 
                 audio_save_path = os.path.join(audio_save_dir, f"{item['target_audio_path']}.wav")
-                total_request_latency, first_chunk_latency, second_chunk_latency, actual_duration = await asyncio.to_thread(
+                total_request_latency, first_chunk_latency, second_chunk_latency, actual_duration, chunk_times = await asyncio.to_thread(
                     run_sync_streaming_inference,
                     sync_triton_client,
                     model_name,
@@ -582,7 +608,7 @@ async def send_streaming(
                         f"Second Chunk Latency: {second_chunk_latency if second_chunk_latency is not None else 'N/A'}, "
                         f"Total Latency: {total_request_latency:.4f}s, Duration: {actual_duration:.4f}s"
                     )
-                    latency_data.append((total_request_latency, first_chunk_latency, second_chunk_latency, actual_duration))
+                    latency_data.append((total_request_latency, first_chunk_latency, second_chunk_latency, actual_duration, chunk_times))
                     total_duration += actual_duration
                 else:
                     print(f"{name}: Item {i} failed.")
@@ -606,6 +632,10 @@ async def send_streaming(
                 print(f"{name}: Error closing sync client: {e}")
 
     print(f"{name}: Finished streaming processing. Total duration synthesized: {total_duration:.4f}s")
+    if warmup_requests > 0 and len(latency_data) > warmup_requests:
+        dropped = latency_data[:warmup_requests]
+        latency_data = latency_data[warmup_requests:]
+        print(f"{name}: Dropped first {len(dropped)} requests as warmup from latency aggregation.")
     return total_duration, latency_data
 
 
@@ -762,6 +792,10 @@ async def main():
     else:
         manifest_item_list = load_manifests(args.manifest_path)
 
+    if args.max_samples is not None and args.max_samples > 0:
+        manifest_item_list = manifest_item_list[: args.max_samples]
+        print(f"Capped dataset to first {len(manifest_item_list)} items via --max-samples.")
+
     stats_client = None
     stats_before = None
     try:
@@ -811,6 +845,7 @@ async def main():
                     chunk_overlap_duration=args.chunk_overlap_duration,
                     use_spk2info_cache=args.use_spk2info_cache,
                     speaker_name=args.speaker_name,
+                    warmup_requests=args.warmup_requests,
                 )
             )
         tasks.append(task)
@@ -857,9 +892,15 @@ async def main():
                 s += "No latency data collected for offline mode.\n"
 
         elif args.mode == "streaming":
-            total_latency_list = [total for (total, first, second, duration) in latency_data if total is not None]
-            first_chunk_latency_list = [first for (total, first, second, duration) in latency_data if first is not None]
-            second_chunk_latency_list = [second for (total, first, second, duration) in latency_data if second is not None]
+            total_latency_list = [total for (total, first, second, duration, chunks) in latency_data if total is not None]
+            first_chunk_latency_list = [first for (total, first, second, duration, chunks) in latency_data if first is not None]
+            second_chunk_latency_list = [second for (total, first, second, duration, chunks) in latency_data if second is not None]
+            inter_chunk_intervals = []
+            for (total, first, second, duration, chunks) in latency_data:
+                if chunks and len(chunks) >= 2:
+                    inter_chunk_intervals.extend(
+                        chunks[k + 1] - chunks[k] for k in range(len(chunks) - 1)
+                    )
 
             s += "\n--- Total Request Latency ---\n"
             if total_latency_list:
@@ -899,6 +940,22 @@ async def main():
                 s += f"average_second_chunk_latency_ms: {avg_second_chunk_latency_ms:.2f}\n"
             else:
                 s += "No second chunk latency data collected (check for errors or if all requests failed before second chunk).\n"
+
+            s += "\n--- Inter-Chunk Interval (jitter) ---\n"
+            if inter_chunk_intervals:
+                intervals_ms = np.array(inter_chunk_intervals) * 1000.0
+                stutter_threshold_ms = 1000.0
+                stutter_fraction = float((intervals_ms > stutter_threshold_ms).mean())
+                s += f"inter_chunk_count: {len(intervals_ms)}\n"
+                s += f"inter_chunk_interval_50_percentile_ms: {np.percentile(intervals_ms, 50):.2f}\n"
+                s += f"inter_chunk_interval_90_percentile_ms: {np.percentile(intervals_ms, 90):.2f}\n"
+                s += f"inter_chunk_interval_95_percentile_ms: {np.percentile(intervals_ms, 95):.2f}\n"
+                s += f"inter_chunk_interval_99_percentile_ms: {np.percentile(intervals_ms, 99):.2f}\n"
+                s += f"inter_chunk_interval_max_ms: {intervals_ms.max():.2f}\n"
+                s += f"average_inter_chunk_interval_ms: {intervals_ms.mean():.2f}\n"
+                s += f"stutter_fraction_above_{int(stutter_threshold_ms)}ms: {stutter_fraction:.4f}\n"
+            else:
+                s += "No inter-chunk interval data collected.\n"
     else:
         s += "No latency data collected.\n"
 

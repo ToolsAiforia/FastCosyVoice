@@ -102,8 +102,8 @@ if [ $stage -le 4 ] && [ $stop_stage -ge 4 ]; then
     BLS_INSTANCE_NUM=$bls_instance_num
 
     python3 client_grpc.py \
-        --server-addr localhost \
-        --server-port 18001 \
+        --server-addr 0.0.0.0 \
+        --server-port 8001 \
         --model-name cosyvoice3 \
         --num-tasks $num_task \
         --mode $mode \

@@ -57,10 +57,10 @@ class TritonPythonModel:
         self.device = torch.device("cuda")
 
         model_dir = model_params["model_dir"]
-        gpu = "l20"
+        device_id = torch.cuda.current_device()
         enable_trt = True
         if enable_trt:
-            self.load_spk_trt(f'{model_dir}/campplus.{gpu}.fp32.trt',
+            self.load_spk_trt(f'{model_dir}/campplus.{device_id}.fp32.trt',
                               f'{model_dir}/campplus.onnx',
                               1,
                               False)

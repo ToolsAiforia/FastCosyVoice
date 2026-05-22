@@ -127,41 +127,36 @@ class ConditionalCFM(BASECFM):
         if isinstance(self.estimator, torch.nn.Module):
             return self.estimator(x, mask, mu, t, spks, cond, streaming=streaming)
         else:
+            # Path D micro-optimization (round-9): execute TRT on current_stream
+            # without per-call synchronize(). Original code did 2× sync per call
+            # × 10 solve_euler iterations × N tokens = ~100-200 ms Python overhead.
+            # TRT execute_async_v3 enqueues on current_stream; subsequent torch
+            # ops on the same stream are correctly ordered without explicit sync.
             [estimator, stream], trt_engine = self.estimator.acquire_estimator()
-            # NOTE need to synchronize when switching stream
-            torch.cuda.current_stream().synchronize()
-            with stream:
-                estimator.set_input_shape('x', (2, 80, x.size(2)))
-                estimator.set_input_shape('mask', (2, 1, x.size(2)))
-                estimator.set_input_shape('mu', (2, 80, x.size(2)))
-                estimator.set_input_shape('t', (2,))
-                estimator.set_input_shape('spks', (2, 80))
-                estimator.set_input_shape('cond', (2, 80, x.size(2)))
-                # IMPORTANT:
-                # Bind by explicit tensor names, not by engine index order.
-                # Tensor order is not guaranteed to be stable across TensorRT versions/builds,
-                # and mis-binding leads to silent corruption/NaNs (commonly observed in fp16).
-                #
-                # Also avoid in-place output into `x` unless the engine explicitly supports it.
-                # Allocate a dedicated output buffer.
-                x_c = x.contiguous()
-                mask_c = mask.contiguous()
-                mu_c = mu.contiguous()
-                t_c = t.contiguous()
-                spks_c = spks.contiguous()
-                cond_c = cond.contiguous()
-                out = torch.empty_like(x_c)
+            estimator.set_input_shape('x', (2, 80, x.size(2)))
+            estimator.set_input_shape('mask', (2, 1, x.size(2)))
+            estimator.set_input_shape('mu', (2, 80, x.size(2)))
+            estimator.set_input_shape('t', (2,))
+            estimator.set_input_shape('spks', (2, 80))
+            estimator.set_input_shape('cond', (2, 80, x.size(2)))
+            # Bind by explicit tensor names, not by engine index order.
+            x_c = x if x.is_contiguous() else x.contiguous()
+            mask_c = mask if mask.is_contiguous() else mask.contiguous()
+            mu_c = mu if mu.is_contiguous() else mu.contiguous()
+            t_c = t if t.is_contiguous() else t.contiguous()
+            spks_c = spks if spks.is_contiguous() else spks.contiguous()
+            cond_c = cond if cond.is_contiguous() else cond.contiguous()
+            out = torch.empty_like(x_c)
 
-                estimator.set_tensor_address('x', x_c.data_ptr())
-                estimator.set_tensor_address('mask', mask_c.data_ptr())
-                estimator.set_tensor_address('mu', mu_c.data_ptr())
-                estimator.set_tensor_address('t', t_c.data_ptr())
-                estimator.set_tensor_address('spks', spks_c.data_ptr())
-                estimator.set_tensor_address('cond', cond_c.data_ptr())
-                estimator.set_tensor_address('estimator_out', out.data_ptr())
-                # run trt engine
-                assert estimator.execute_async_v3(torch.cuda.current_stream().cuda_stream) is True
-                torch.cuda.current_stream().synchronize()
+            estimator.set_tensor_address('x', x_c.data_ptr())
+            estimator.set_tensor_address('mask', mask_c.data_ptr())
+            estimator.set_tensor_address('mu', mu_c.data_ptr())
+            estimator.set_tensor_address('t', t_c.data_ptr())
+            estimator.set_tensor_address('spks', spks_c.data_ptr())
+            estimator.set_tensor_address('cond', cond_c.data_ptr())
+            estimator.set_tensor_address('estimator_out', out.data_ptr())
+            assert estimator.execute_async_v3(torch.cuda.current_stream().cuda_stream) is True
+            # No sync — out is queued on current_stream, downstream ops read it correctly.
             self.estimator.release_estimator(estimator, stream)
             return out
 

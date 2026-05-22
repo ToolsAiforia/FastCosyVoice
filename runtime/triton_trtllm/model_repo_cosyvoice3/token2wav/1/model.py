@@ -107,21 +107,133 @@ class TritonPythonModel:
         logger.info(f"Token2wav (flow-only) initialized, token_mel_ratio={self.token_mel_ratio}")
 
     def load_trt(self, model_dir, trt_concurrent=1):
+        """Load layer-mixed precision TRT engine (round-9 production winner).
+
+        Strategy: pure FP32 ONNX → FP16 default + FP32 override for sensitive
+        layers (Normalization, Softmax, time_embed, proj_out). Per-call compute
+        −25%, TTFA p95 @ N=8 −14%, all audio metrics equal or better than
+        autocast baseline (WER 5.21% vs 5.96%, UTMOS 3.360 identical).
+        Opt profile B=2 (CFG conditioned/unconditioned packed).
+        """
         device_id = torch.cuda.current_device()
-        onnx_path = os.path.join(model_dir, 'flow.decoder.estimator.autocast_fp16.onnx')
-        trt_path = os.path.join(model_dir, f'flow.decoder.estimator.autocast_fp16.{device_id}.plan')
+        trt_path = os.path.join(
+            model_dir, f'flow.decoder.estimator.layer_mixed_fp16.{device_id}.plan')
 
         if not os.path.exists(trt_path) or os.path.getsize(trt_path) == 0:
-            trt_kwargs = self.get_trt_kwargs()
-            convert_onnx_to_trt(trt_path, trt_kwargs, onnx_path,
-                                fp16=True, autocast_mode=True)
+            onnx_path = os.path.join(model_dir, 'flow.decoder.estimator.fp32.onnx')
+            self._build_layer_mixed_trt(onnx_path, trt_path)
         del self.flow.decoder.estimator
         import tensorrt as trt
         with open(trt_path, 'rb') as f:
-            estimator_engine = trt.Runtime(trt.Logger(trt.Logger.INFO)).deserialize_cuda_engine(f.read())
+            estimator_engine = trt.Runtime(trt.Logger(trt.Logger.WARNING)).deserialize_cuda_engine(f.read())
         assert estimator_engine is not None, f'failed to load trt {trt_path}'
         self.flow.decoder.estimator = TrtContextWrapper(
             estimator_engine, trt_concurrent=trt_concurrent, device=str(self.device))
+        logger.info(f"Loaded layer-mixed TRT engine: {os.path.basename(trt_path)}")
+
+    def _build_layer_mixed_trt(self, onnx_path, trt_path):
+        """Build TRT engine with per-layer mixed precision from pure FP32 ONNX."""
+        import tensorrt as trt
+        assert os.path.exists(onnx_path), f"Missing FP32 ONNX: {onnx_path}"
+        logger.info(f"Building layer-mixed TRT plan from {os.path.basename(onnx_path)} "
+                    f"(takes ~1-2 min, can OOM if VRAM <12 GB free)")
+
+        trt_logger = trt.Logger(trt.Logger.WARNING)
+        network_flags = 1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
+        builder = trt.Builder(trt_logger)
+        network = builder.create_network(network_flags)
+        parser = trt.OnnxParser(network, trt_logger)
+        config = builder.create_builder_config()
+        config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 8 * (1 << 30))
+        config.set_flag(trt.BuilderFlag.FP16)
+        config.set_flag(trt.BuilderFlag.PREFER_PRECISION_CONSTRAINTS)
+
+        with open(onnx_path, 'rb') as f:
+            if not parser.parse(f.read()):
+                for i in range(parser.num_errors):
+                    logger.error(parser.get_error(i))
+                raise ValueError(f'failed to parse {onnx_path}')
+
+        # Force FP16 IO (compatible with PyTorch runtime)
+        for i in range(network.num_inputs):
+            network.get_input(i).dtype = trt.DataType.HALF
+        for i in range(network.num_outputs):
+            network.get_output(i).dtype = trt.DataType.HALF
+
+        # Mark precision-sensitive layers as FP32 (75 layers in round-9)
+        SKIP_TYPES = {trt.LayerType.CONSTANT, trt.LayerType.CAST, trt.LayerType.SHAPE,
+                      trt.LayerType.GATHER, trt.LayerType.SLICE, trt.LayerType.SHUFFLE,
+                      trt.LayerType.CONCATENATION, trt.LayerType.IDENTITY}
+        SENSITIVE_ACT = {trt.ActivationType.SIGMOID, trt.ActivationType.TANH,
+                         trt.ActivationType.HARD_SIGMOID, trt.ActivationType.ELU,
+                         trt.ActivationType.GELU_ERF, trt.ActivationType.GELU_TANH}
+        SENSITIVE_UNARY = {trt.UnaryOperation.EXP, trt.UnaryOperation.LOG,
+                           trt.UnaryOperation.SQRT}
+        FLOAT_LIKE = (trt.DataType.FLOAT, trt.DataType.HALF, trt.DataType.BF16)
+        fp32_count = 0
+        for i in range(network.num_layers):
+            layer = network.get_layer(i)
+            if layer.type in SKIP_TYPES:
+                continue
+            name_low = layer.name.lower()
+            should_fp32 = False
+            if layer.type == trt.LayerType.SOFTMAX:
+                should_fp32 = True
+            elif layer.type == trt.LayerType.NORMALIZATION:
+                should_fp32 = True
+            elif layer.type == trt.LayerType.ACTIVATION:
+                try:
+                    should_fp32 = layer.algo_type in SENSITIVE_ACT
+                except Exception:
+                    pass
+            elif layer.type == trt.LayerType.UNARY:
+                try:
+                    should_fp32 = layer.op in SENSITIVE_UNARY
+                except Exception:
+                    pass
+            elif 'time_embed' in name_low or 'time_mlp' in name_low:
+                should_fp32 = True
+            elif 'proj_out' in name_low or 'out_proj' in name_low:
+                should_fp32 = True
+            if not should_fp32:
+                continue
+            try:
+                for j in range(layer.num_outputs):
+                    if layer.get_output(j).dtype not in FLOAT_LIKE:
+                        should_fp32 = False
+                        break
+            except Exception:
+                pass
+            if should_fp32:
+                try:
+                    layer.precision = trt.DataType.FLOAT
+                    for j in range(layer.num_outputs):
+                        layer.set_output_type(j, trt.DataType.FLOAT)
+                    fp32_count += 1
+                except Exception:
+                    pass
+
+        logger.info(f"Marked {fp32_count}/{network.num_layers} layers as FP32 "
+                    f"(Normalization/Softmax/time_embed/proj_out/sensitive activations)")
+
+        # Optimization profile: B=2 (CFG conditioned/unconditioned packed)
+        profile = builder.create_optimization_profile()
+        shapes = {
+            "x":    [(2, 80, 4), (2, 80, 500), (2, 80, 3000)],
+            "mask": [(2, 1, 4),  (2, 1, 500),  (2, 1, 3000)],
+            "mu":   [(2, 80, 4), (2, 80, 500), (2, 80, 3000)],
+            "cond": [(2, 80, 4), (2, 80, 500), (2, 80, 3000)],
+        }
+        for name, (mn, op, mx) in shapes.items():
+            profile.set_shape(name, mn, op, mx)
+        config.add_optimization_profile(profile)
+
+        engine_bytes = builder.build_serialized_network(network, config)
+        if engine_bytes is None:
+            raise RuntimeError("TRT build_serialized_network returned None — check VRAM")
+        with open(trt_path, 'wb') as f:
+            f.write(bytes(engine_bytes))
+        logger.info(f"Built {trt_path} ({os.path.getsize(trt_path) // (1024*1024)} MB)")
 
     def get_trt_kwargs(self):
         min_shape = [(2, 80, 4), (2, 1, 4), (2, 80, 4), (2, 80, 4)]

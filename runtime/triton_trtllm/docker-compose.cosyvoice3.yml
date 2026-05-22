@@ -1,14 +1,21 @@
 services:
   tts:
-    image: soar97/triton-cosyvoice:25.06
+    # Production fat image (model weights baked in, ~37 GB).
+    # Build locally: docker build -f Dockerfile.cosyvoice3 -t cosyvoice3-tts:h100 .
+    # Or pull from registry: image: <your-registry>/cosyvoice3-tts:h100
+    image: cosyvoice3-tts:h100
+    container_name: cosyvoice3-tts
     shm_size: '1gb'
     ports:
-      - "8000:8000"
-      - "8001:8001"
-      - "8002:8002"
+      - "8000:8000"   # HTTP
+      - "8001:8001"   # gRPC
+      - "8002:8002"   # Prometheus metrics
     environment:
       - PYTHONIOENCODING=utf-8
-      - MODEL_ID=${MODEL_ID}
+      # Override defaults if needed (see entrypoint_cosyvoice3.sh):
+      # - BLS_INSTANCE_NUM=2
+      # - LLM_KV_CACHE_FRACTION=0.4
+      # - LLM_MAX_BATCH_SIZE=64
     deploy:
       resources:
         reservations:
@@ -16,5 +23,10 @@ services:
             - driver: nvidia
               device_ids: ['0']
               capabilities: [gpu]
-    command: >
-      /bin/bash -c "cd /workspace && git clone https://github.com/FunAudioLLM/CosyVoice.git && cd CosyVoice && git submodule update --init --recursive && cd runtime/triton_trtllm && bash run_cosyvoice3.sh 0 3"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8000/v2/health/ready || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 900s  # 15 min cold-start (TRT-LLM + HiFT B-dyn + spk2info)
+      retries: 3

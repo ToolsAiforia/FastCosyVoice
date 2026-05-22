@@ -1,0 +1,43 @@
+# Slim production image — model weights pulled from HuggingFace at first run.
+# Image size: ~17 GB (vs ~37 GB for fat image with baked weights).
+#
+# Compared to Dockerfile.cosyvoice3:
+#   - No ADD ./Fun-CosyVoice3-0.5B-2512/ (downloaded at runtime by entrypoint)
+#   - No ADD ./cosyvoice3_llm/           (same)
+#   - Adds huggingface_hub Python pkg
+#   - First-start cold time ~15-20 min (vs ~10-15 min for fat: +5 min HF pull)
+#
+# Recommended volume mount for caching downloaded weights between runs:
+#   docker run -v cosyvoice3_models:/workdir/models ... cosyvoice3-tts:h100-slim
+FROM soar97/triton-cosyvoice:25.06
+
+RUN pip install --no-cache-dir cython && \
+    pip install --no-cache-dir --no-build-isolation --no-deps matcha-tts && \
+    pip install --no-cache-dir "s3tokenizer>=0.3" x-transformers && \
+    pip install --no-cache-dir "huggingface_hub[cli,hf_transfer]>=0.24" && \
+    pip install --no-cache-dir --no-deps \
+      "git+https://github.com/ToolsAiforia/FastCosyVoice@v0.0.1"
+
+# WORKDIR /workspace gets overwritten by runpod
+WORKDIR /workdir
+
+# Model repo + scripts (small, baked in)
+ADD ./model_repo_cosyvoice3 /model_repo
+
+COPY entrypoint_cosyvoice3.sh /workdir/entrypoint.sh
+COPY scripts/convert_checkpoint.py /workdir/scripts/convert_checkpoint.py
+COPY scripts/fill_template.py /workdir/scripts/fill_template.py
+COPY scripts/build_hift_batched_trt.py /workdir/scripts/build_hift_batched_trt.py
+COPY generate_spk2info.py /workdir/generate_spk2info.py
+
+# Bundle default 'ref' speaker source for auto-bake on first start.
+COPY reference.wav /workdir/reference.wav
+COPY reference_text.txt /workdir/reference_text.txt
+
+# Fast HF transfers
+ENV HF_HUB_ENABLE_HF_TRANSFER=1
+
+RUN chmod +x /workdir/entrypoint.sh
+
+EXPOSE 8000 8001 8002
+ENTRYPOINT ["/workdir/entrypoint.sh"]

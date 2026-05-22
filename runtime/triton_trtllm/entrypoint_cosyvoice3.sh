@@ -30,6 +30,31 @@ echo "  Decoupled mode:    ${DECOUPLED_MODE}"
 echo "  BLS instances:     ${BLS_INSTANCE_NUM}"
 echo "============================================"
 
+# --- Step -1: Download model weights from HuggingFace if absent (slim image) ---
+# Fat image bakes weights at COPY-time and skips this entirely. Slim image
+# pulls from HuggingFace at first start (uses hf_transfer for fast download).
+if [ ! -d "${MODEL_DIR}" ] || [ -z "$(ls -A "${MODEL_DIR}" 2>/dev/null)" ]; then
+    if ! command -v huggingface-cli >/dev/null 2>&1; then
+        echo "ERROR: ${MODEL_DIR} missing and huggingface-cli not installed."
+        echo "       Fat image expects weights baked at build time, slim expects HF download."
+        exit 1
+    fi
+    echo "[-1/4] Pulling Fun-CosyVoice3-0.5B-2512 from HuggingFace..."
+    mkdir -p "${MODEL_DIR}"
+    huggingface-cli download --local-dir "${MODEL_DIR}" FunAudioLLM/Fun-CosyVoice3-0.5B-2512
+    huggingface-cli download --local-dir "${MODEL_DIR}" yuekai/Fun-CosyVoice3-0.5B-2512-FP16-ONNX
+fi
+
+if [ ! -d "${LLM_TOKENIZER_DIR}" ] || [ -z "$(ls -A "${LLM_TOKENIZER_DIR}" 2>/dev/null)" ]; then
+    if ! command -v huggingface-cli >/dev/null 2>&1; then
+        echo "ERROR: ${LLM_TOKENIZER_DIR} missing and huggingface-cli not installed."
+        exit 1
+    fi
+    echo "[-1/4] Pulling cosyvoice3_llm from HuggingFace..."
+    mkdir -p "${LLM_TOKENIZER_DIR}"
+    huggingface-cli download --local-dir "${LLM_TOKENIZER_DIR}" yuekai/Fun-CosyVoice3-0.5B-2512-LLM-HF
+fi
+
 # --- Step 0: Build TRT-LLM engine if not present ---
 if [ ! -f "${TRT_ENGINES_DIR}/rank0.engine" ]; then
     echo "[0/4] Building TRT-LLM engine (${TRT_DTYPE})..."

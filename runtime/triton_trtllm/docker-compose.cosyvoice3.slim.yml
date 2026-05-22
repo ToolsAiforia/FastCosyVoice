@@ -1,0 +1,41 @@
+services:
+  tts:
+    # Slim production image — model weights pulled from HuggingFace at first run.
+    # Build locally:   docker build -f Dockerfile.cosyvoice3.slim -t cosyvoice3-tts:h100-slim .
+    # Or pull from registry: image: <your-registry>/cosyvoice3-tts:h100-slim
+    image: cosyvoice3-tts:h100-slim
+    container_name: cosyvoice3-tts
+    shm_size: '1gb'
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+      - "8002:8002"
+    environment:
+      - PYTHONIOENCODING=utf-8
+      - HF_HUB_ENABLE_HF_TRANSFER=1
+      # - HF_TOKEN=${HF_TOKEN}        # uncomment if pulling private HF repos
+      # - BLS_INSTANCE_NUM=2
+      # - LLM_KV_CACHE_FRACTION=0.4
+    volumes:
+      # Persist HF downloads + TRT engines between runs.
+      # First start: ~15-20 min cold (HF pull + TRT build).
+      # Subsequent starts: ~30 sec (everything cached).
+      - cosyvoice3_workdir:/workdir
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['0']
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8000/v2/health/ready || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 1200s  # 20 min cold-start (HF pull + TRT-LLM + HiFT B-dyn + spk2info)
+      retries: 3
+
+volumes:
+  cosyvoice3_workdir:
+    # Named volume — survives `docker compose down`; remove with `docker volume rm cosyvoice3_workdir`

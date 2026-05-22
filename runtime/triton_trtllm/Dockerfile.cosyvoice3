@@ -16,6 +16,15 @@ ADD ./model_repo_cosyvoice3 /model_repo
 COPY entrypoint_cosyvoice3.sh /workdir/entrypoint.sh
 COPY scripts/convert_checkpoint.py /workdir/scripts/convert_checkpoint.py
 COPY scripts/fill_template.py /workdir/scripts/fill_template.py
+COPY scripts/build_hift_batched_trt.py /workdir/scripts/build_hift_batched_trt.py
+COPY generate_spk2info.py /workdir/generate_spk2info.py
+
+# Bundle default 'ref' speaker source for auto-bake on first start.
+# Entrypoint will call generate_spk2info.py with these inputs if spk2info.pt
+# is absent (so docker `up` delivers a ready-to-use stack).
+COPY reference.wav /workdir/reference.wav
+COPY reference_text.txt /workdir/reference_text.txt
+
 RUN chmod +x /workdir/entrypoint.sh
 
 EXPOSE 8000 8001 8002

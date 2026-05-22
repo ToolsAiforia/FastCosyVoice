@@ -36,6 +36,7 @@ data
 raw_wav
 tensorboard
 **/*build*
+!runtime/triton_trtllm/scripts/build_hift_batched_trt.py
 
 # Clangd files
 .cache
@@ -51,3 +52,35 @@ pretrained_models/*
 *.tar
 output/*
 model.cache
+
+# Triton + TRT deployment artifacts (built per-GPU, fetched per-host)
+runtime/triton_trtllm/Fun-CosyVoice3-0.5B-2512/
+runtime/triton_trtllm/cosyvoice3_llm/
+runtime/triton_trtllm/trt_engines*/
+runtime/triton_trtllm/trt_weights*/
+runtime/triton_trtllm/model_repo_cosyvoice3_copy/
+runtime/triton_trtllm/tts_calib_*/
+runtime/triton_trtllm/tts_calib_*.jsonl
+
+# Bench outputs (dev artifacts, never committed)
+runtime/triton_trtllm/bench_*/
+runtime/triton_trtllm/bench_*.sh
+listening_samples/
+listening_samples_v2/
+instruction_demo/
+ru_samples/
+ru_samples_v2/
+
+# Intermediate dev artifacts
+runtime/triton_trtllm/SYNC_*.md
+runtime/triton_trtllm/REPORT_H100_ALL_ROUNDS.md
+runtime/triton_trtllm/BLS_ANALYSIS_AND_IMPROVEMENTS.md
+runtime/triton_trtllm/slack_handoff/
+runtime/triton_trtllm/warmup_pipeline.py
+runtime/triton_trtllm/audio_audit.py
+runtime/triton_trtllm/export_hift_trt.py
+runtime/triton_trtllm/ref_ru.wav
+runtime/triton_trtllm/reference_5s.wav
+runtime/triton_trtllm/trtllm_runtime_options.yaml
+runtime/2026-*.ogg
+CLAUDE.md

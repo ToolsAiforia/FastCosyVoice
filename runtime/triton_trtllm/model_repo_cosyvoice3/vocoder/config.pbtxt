@@ -1,13 +1,16 @@
 name: "vocoder"
 backend: "python"
-max_batch_size: ${triton_max_batch_size}
+# Tier-4 BLS-side coordinator batches mel from multiple concurrent streams in
+# one BLS event loop. Up to B=8 (matches B-dynamic TRT plan max profile).
+max_batch_size: 8
 dynamic_batching {
-    max_queue_delay_microseconds: ${max_queue_delay_microseconds}
+    max_queue_delay_microseconds: 0
+    preferred_batch_size: [ 2, 4, 8 ]
 }
 parameters [
   {
    key: "model_dir",
-   value: {string_value:"${model_dir}"}
+   value: {string_value:"/workspace/CosyVoice/runtime/triton_trtllm/Fun-CosyVoice3-0.5B-2512"}
   }
 ]
 
@@ -34,7 +37,28 @@ output [
 
 instance_group [
   {
-    count: 1
+    # Tier-4: reduced from 8 → 4 — fewer instances mean more concurrent streams
+    # per instance, raising the chance of in-process batching via BLS coordinator.
+    count: 4
     kind: KIND_CPU
+  }
+]
+
+# Tier-3 warmup: HiFT TRT decode_core kernel JIT-compiles on first call for each
+# unique shape. Pre-warm with typical chunk 1 mel shape (50 frames) to eliminate
+# cold-start tail.
+model_warmup [
+  {
+    name: "warmup_streaming_chunk0"
+    count: 1
+    batch_size: 1
+    inputs {
+      key: "mel"
+      value: { data_type: TYPE_FP32, dims: [80, 50], zero_data: true }
+    }
+    inputs {
+      key: "finalize"
+      value: { data_type: TYPE_BOOL, dims: [1], zero_data: true }
+    }
   }
 ]

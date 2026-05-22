@@ -18,7 +18,7 @@ trt_engines_dir=$cosyvoice_path/runtime/triton_trtllm/trt_engines_${trt_dtype}
 
 model_repo_src=$cosyvoice_path/runtime/triton_trtllm/model_repo_cosyvoice3
 model_repo=$cosyvoice_path/runtime/triton_trtllm/model_repo_cosyvoice3_copy
-bls_instance_num=10
+bls_instance_num=16
 
 if [ $stage -le -1 ] && [ $stop_stage -ge -1 ]; then
 

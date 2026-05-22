@@ -92,20 +92,26 @@ class ConditionalCFM(BASECFM):
 
         # Do not use concat, it may cause memory format changed and trt infer with wrong results!
         # NOTE when flow run in amp mode, x.dtype is float32, which cause nan in trt fp16 inference, so set dtype=spks.dtype
-        x_in = torch.zeros([2, 80, x.size(2)], device=x.device, dtype=spks.dtype)
-        mask_in = torch.zeros([2, 1, x.size(2)], device=x.device, dtype=spks.dtype)
-        mu_in = torch.zeros([2, 80, x.size(2)], device=x.device, dtype=spks.dtype)
-        t_in = torch.zeros([2], device=x.device, dtype=spks.dtype)
-        spks_in = torch.zeros([2, 80], device=x.device, dtype=spks.dtype)
-        cond_in = torch.zeros([2, 80, x.size(2)], device=x.device, dtype=spks.dtype)
+        # CFG packs [conditioned | unconditioned] along batch dim. For B requests → 2*B rows.
+        B = x.size(0)
+        x_in = torch.zeros([2 * B, 80, x.size(2)], device=x.device, dtype=spks.dtype)
+        mask_in = torch.zeros([2 * B, 1, x.size(2)], device=x.device, dtype=spks.dtype)
+        mu_in = torch.zeros([2 * B, 80, x.size(2)], device=x.device, dtype=spks.dtype)
+        t_in = torch.zeros([2 * B], device=x.device, dtype=spks.dtype)
+        spks_in = torch.zeros([2 * B, 80], device=x.device, dtype=spks.dtype)
+        cond_in = torch.zeros([2 * B, 80, x.size(2)], device=x.device, dtype=spks.dtype)
         for step in range(1, len(t_span)):
-            # Classifier-Free Guidance inference introduced in VoiceBox
-            x_in[:] = x
-            mask_in[:] = mask
-            mu_in[0] = mu
+            # Classifier-Free Guidance inference introduced in VoiceBox.
+            # Rows [0:B] = conditioned, [B:2B] = unconditioned (zeros for mu/spks/cond).
+            # For B=1 this matches the original [2,...] shape behavior.
+            x_in[:B] = x
+            x_in[B:] = x
+            mask_in[:B] = mask
+            mask_in[B:] = mask
+            mu_in[:B] = mu        # mu_in[B:] stays zeros (unconditioned)
             t_in[:] = t.unsqueeze(0)
-            spks_in[0] = spks
-            cond_in[0] = cond
+            spks_in[:B] = spks    # spks_in[B:] stays zeros
+            cond_in[:B] = cond    # cond_in[B:] stays zeros
             dphi_dt = self.forward_estimator(
                 x_in, mask_in,
                 mu_in, t_in,
@@ -127,41 +133,38 @@ class ConditionalCFM(BASECFM):
         if isinstance(self.estimator, torch.nn.Module):
             return self.estimator(x, mask, mu, t, spks, cond, streaming=streaming)
         else:
+            # Path D micro-optimization (2026-05-20): execute TRT on current_stream
+            # without per-call synchronize(). Original code did 2 syncs per call
+            # × 10 solve_euler iterations × N tokens = huge Python overhead.
+            # TRT execute_async_v3 enqueues on current_stream; subsequent torch
+            # ops on the same stream are correctly ordered without explicit sync.
             [estimator, stream], trt_engine = self.estimator.acquire_estimator()
-            # NOTE need to synchronize when switching stream
-            torch.cuda.current_stream().synchronize()
-            with stream:
-                estimator.set_input_shape('x', (2, 80, x.size(2)))
-                estimator.set_input_shape('mask', (2, 1, x.size(2)))
-                estimator.set_input_shape('mu', (2, 80, x.size(2)))
-                estimator.set_input_shape('t', (2,))
-                estimator.set_input_shape('spks', (2, 80))
-                estimator.set_input_shape('cond', (2, 80, x.size(2)))
-                # IMPORTANT:
-                # Bind by explicit tensor names, not by engine index order.
-                # Tensor order is not guaranteed to be stable across TensorRT versions/builds,
-                # and mis-binding leads to silent corruption/NaNs (commonly observed in fp16).
-                #
-                # Also avoid in-place output into `x` unless the engine explicitly supports it.
-                # Allocate a dedicated output buffer.
-                x_c = x.contiguous()
-                mask_c = mask.contiguous()
-                mu_c = mu.contiguous()
-                t_c = t.contiguous()
-                spks_c = spks.contiguous()
-                cond_c = cond.contiguous()
-                out = torch.empty_like(x_c)
+            two_B = x.size(0)
+            estimator.set_input_shape('x', (two_B, 80, x.size(2)))
+            estimator.set_input_shape('mask', (two_B, 1, x.size(2)))
+            estimator.set_input_shape('mu', (two_B, 80, x.size(2)))
+            estimator.set_input_shape('t', (two_B,))
+            estimator.set_input_shape('spks', (two_B, 80))
+            estimator.set_input_shape('cond', (two_B, 80, x.size(2)))
+            # Skip redundant .contiguous() — inputs from solve_euler pre-allocated buffers
+            # are already contiguous; check first to avoid unnecessary copies.
+            x_c = x if x.is_contiguous() else x.contiguous()
+            mask_c = mask if mask.is_contiguous() else mask.contiguous()
+            mu_c = mu if mu.is_contiguous() else mu.contiguous()
+            t_c = t if t.is_contiguous() else t.contiguous()
+            spks_c = spks if spks.is_contiguous() else spks.contiguous()
+            cond_c = cond if cond.is_contiguous() else cond.contiguous()
+            out = torch.empty_like(x_c)
 
-                estimator.set_tensor_address('x', x_c.data_ptr())
-                estimator.set_tensor_address('mask', mask_c.data_ptr())
-                estimator.set_tensor_address('mu', mu_c.data_ptr())
-                estimator.set_tensor_address('t', t_c.data_ptr())
-                estimator.set_tensor_address('spks', spks_c.data_ptr())
-                estimator.set_tensor_address('cond', cond_c.data_ptr())
-                estimator.set_tensor_address('estimator_out', out.data_ptr())
-                # run trt engine
-                assert estimator.execute_async_v3(torch.cuda.current_stream().cuda_stream) is True
-                torch.cuda.current_stream().synchronize()
+            estimator.set_tensor_address('x', x_c.data_ptr())
+            estimator.set_tensor_address('mask', mask_c.data_ptr())
+            estimator.set_tensor_address('mu', mu_c.data_ptr())
+            estimator.set_tensor_address('t', t_c.data_ptr())
+            estimator.set_tensor_address('spks', spks_c.data_ptr())
+            estimator.set_tensor_address('cond', cond_c.data_ptr())
+            estimator.set_tensor_address('estimator_out', out.data_ptr())
+            assert estimator.execute_async_v3(torch.cuda.current_stream().cuda_stream) is True
+            # No sync — out is queued on current_stream, downstream ops read it correctly.
             self.estimator.release_estimator(estimator, stream)
             return out
 
@@ -233,7 +236,10 @@ class CausalConditionalCFM(ConditionalCFM):
                 shape: (batch_size, n_feats, mel_timesteps)
         """
 
+        # Same fixed noise pattern for all rows in a batch (deterministic per-stream).
         z = self.rand_noise[:, :, :mu.size(2)].to(mu.device).to(mu.dtype) * temperature
+        if mu.size(0) > 1:
+            z = z.expand(mu.size(0), -1, -1).contiguous()
         # fix prompt and overlap part mu and z
         t_span = torch.linspace(0, 1, n_timesteps + 1, device=mu.device, dtype=mu.dtype)
         if self.t_scheduler == 'cosine':

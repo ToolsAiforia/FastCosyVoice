@@ -100,6 +100,11 @@ class TritonPythonModel:
         )
         self.flow.to(self.device).eval()
 
+        # n_timesteps experiment 2026-05-19: nt=6 показал peak/clip audit clean,
+        # но subjective listening выявил артефакты — REVERTED to default nt=10.
+        # См. bench_n_timesteps_sweep/SUMMARY.md
+        # self.flow.n_timesteps stays at 10 (default)
+
         # TRT acceleration for flow decoder estimator
         self.load_trt(model_dir)
 
@@ -107,21 +112,136 @@ class TritonPythonModel:
         logger.info(f"Token2wav (flow-only) initialized, token_mel_ratio={self.token_mel_ratio}")
 
     def load_trt(self, model_dir, trt_concurrent=1):
+        """Load layer-mixed precision TRT engine (production winner 2026-05-19).
+
+        Strategy: pure FP32 ONNX → FP16 default + FP32 override for sensitive layers
+        (Normalization, Softmax, time_embed, proj_out). Per-call compute -25%, TTFA
+        p95 @ N=8 -14%, all audio metrics equal or better than autocast baseline
+        (WER 5.21% vs 5.96%, UTMOS 3.360 identical, peak/clip clean).
+        See bench_n_timesteps_sweep/layer_mixed/EVAL_SUITE_RESULTS.md
+        """
         device_id = torch.cuda.current_device()
-        onnx_path = os.path.join(model_dir, 'flow.decoder.estimator.autocast_fp16.onnx')
-        trt_path = os.path.join(model_dir, f'flow.decoder.estimator.autocast_fp16.{device_id}.plan')
+        # Tier-4: B-dynamic plan (B=2..16) for real GPU batching from BLS coordinator
+        trt_path = os.path.join(
+            model_dir, f'flow.decoder.estimator.layer_mixed_B8_fp16.{device_id}.plan')
 
         if not os.path.exists(trt_path) or os.path.getsize(trt_path) == 0:
-            trt_kwargs = self.get_trt_kwargs()
-            convert_onnx_to_trt(trt_path, trt_kwargs, onnx_path,
-                                fp16=True, autocast_mode=True)
+            onnx_path = os.path.join(model_dir, 'flow.decoder.estimator.fp32.onnx')
+            self._build_layer_mixed_trt(onnx_path, trt_path)
+
         del self.flow.decoder.estimator
         import tensorrt as trt
         with open(trt_path, 'rb') as f:
-            estimator_engine = trt.Runtime(trt.Logger(trt.Logger.INFO)).deserialize_cuda_engine(f.read())
+            estimator_engine = trt.Runtime(trt.Logger(trt.Logger.WARNING)).deserialize_cuda_engine(f.read())
         assert estimator_engine is not None, f'failed to load trt {trt_path}'
         self.flow.decoder.estimator = TrtContextWrapper(
             estimator_engine, trt_concurrent=trt_concurrent, device=str(self.device))
+        logger.info(f"Loaded layer-mixed TRT engine: {os.path.basename(trt_path)}")
+
+    def _build_layer_mixed_trt(self, onnx_path, trt_path):
+        """Build TRT engine with per-layer mixed precision from pure FP32 ONNX."""
+        import tensorrt as trt
+        assert os.path.exists(onnx_path), f"Missing FP32 ONNX: {onnx_path}"
+        logger.info(f"Building layer-mixed TRT plan from {os.path.basename(onnx_path)} "
+                    f"(takes ~1-2 min, can OOM if VRAM <12 GB free)")
+
+        trt_logger = trt.Logger(trt.Logger.WARNING)
+        network_flags = 1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
+        builder = trt.Builder(trt_logger)
+        network = builder.create_network(network_flags)
+        parser = trt.OnnxParser(network, trt_logger)
+        config = builder.create_builder_config()
+        config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 8 * (1 << 30))
+        # Mixed precision: default FP16, TRT respects per-layer FP32 hints
+        config.set_flag(trt.BuilderFlag.FP16)
+        config.set_flag(trt.BuilderFlag.PREFER_PRECISION_CONSTRAINTS)
+
+        with open(onnx_path, 'rb') as f:
+            if not parser.parse(f.read()):
+                for i in range(parser.num_errors):
+                    logger.error(parser.get_error(i))
+                raise ValueError(f'failed to parse {onnx_path}')
+
+        # Force FP16 IO (compatible with PyTorch runtime)
+        for i in range(network.num_inputs):
+            network.get_input(i).dtype = trt.DataType.HALF
+        for i in range(network.num_outputs):
+            network.get_output(i).dtype = trt.DataType.HALF
+
+        # Mark precision-sensitive layers as FP32
+        SKIP_TYPES = {trt.LayerType.CONSTANT, trt.LayerType.CAST, trt.LayerType.SHAPE,
+                      trt.LayerType.GATHER, trt.LayerType.SLICE, trt.LayerType.SHUFFLE,
+                      trt.LayerType.CONCATENATION, trt.LayerType.IDENTITY}
+        SENSITIVE_ACT = {trt.ActivationType.SIGMOID, trt.ActivationType.TANH,
+                         trt.ActivationType.HARD_SIGMOID, trt.ActivationType.ELU,
+                         trt.ActivationType.GELU_ERF, trt.ActivationType.GELU_TANH}
+        SENSITIVE_UNARY = {trt.UnaryOperation.EXP, trt.UnaryOperation.LOG,
+                           trt.UnaryOperation.SQRT}
+        FLOAT_LIKE = (trt.DataType.FLOAT, trt.DataType.HALF, trt.DataType.BF16)
+        fp32_count = 0
+        for i in range(network.num_layers):
+            layer = network.get_layer(i)
+            if layer.type in SKIP_TYPES:
+                continue
+            name_low = layer.name.lower()
+            should_fp32 = False
+            if layer.type == trt.LayerType.SOFTMAX:
+                should_fp32 = True
+            elif layer.type == trt.LayerType.NORMALIZATION:
+                should_fp32 = True
+            elif layer.type == trt.LayerType.ACTIVATION:
+                try:
+                    should_fp32 = layer.algo_type in SENSITIVE_ACT
+                except Exception:
+                    pass
+            elif layer.type == trt.LayerType.UNARY:
+                try:
+                    should_fp32 = layer.op in SENSITIVE_UNARY
+                except Exception:
+                    pass
+            elif 'time_embed' in name_low or 'time_mlp' in name_low:
+                should_fp32 = True
+            elif 'proj_out' in name_low or 'out_proj' in name_low:
+                should_fp32 = True
+            if not should_fp32:
+                continue
+            try:
+                for j in range(layer.num_outputs):
+                    if layer.get_output(j).dtype not in FLOAT_LIKE:
+                        should_fp32 = False
+                        break
+            except Exception:
+                pass
+            if should_fp32:
+                try:
+                    layer.precision = trt.DataType.FLOAT
+                    for j in range(layer.num_outputs):
+                        layer.set_output_type(j, trt.DataType.FLOAT)
+                    fp32_count += 1
+                except Exception:
+                    pass
+
+        logger.info(f"Marked {fp32_count}/{network.num_layers} layers as FP32 "
+                    f"(Normalization/Softmax/time_embed/proj_out/sensitive activations)")
+
+        # Optimization profile (production shapes)
+        profile = builder.create_optimization_profile()
+        shapes = {
+            "x":    [(2, 80, 4), (2, 80, 500), (2, 80, 3000)],
+            "mask": [(2, 1, 4),  (2, 1, 500),  (2, 1, 3000)],
+            "mu":   [(2, 80, 4), (2, 80, 500), (2, 80, 3000)],
+            "cond": [(2, 80, 4), (2, 80, 500), (2, 80, 3000)],
+        }
+        for name, (mn, op, mx) in shapes.items():
+            profile.set_shape(name, mn, op, mx)
+        config.add_optimization_profile(profile)
+
+        engine_bytes = builder.build_serialized_network(network, config)
+        if engine_bytes is None:
+            raise RuntimeError("TRT build_serialized_network returned None — check VRAM")
+        with open(trt_path, 'wb') as f:
+            f.write(bytes(engine_bytes))
+        logger.info(f"Built {trt_path} ({os.path.getsize(trt_path) // (1024*1024)} MB)")
 
     def get_trt_kwargs(self):
         min_shape = [(2, 80, 4), (2, 1, 4), (2, 80, 4), (2, 80, 4)]
@@ -131,70 +251,96 @@ class TritonPythonModel:
         return {'min_shape': min_shape, 'opt_shape': opt_shape,
                 'max_shape': max_shape, 'input_names': input_names}
 
+    def _extract_request(self, request):
+        """Pull all input tensors from one request → dict (CUDA tensors)."""
+        target = pb_utils.get_input_tensor_by_name(request, "target_speech_tokens")
+        target = torch.utils.dlpack.from_dlpack(target.to_dlpack()).to(self.device)
+        if target.dim() == 1:
+            target = target.unsqueeze(0)
+
+        prompt_pb = pb_utils.get_input_tensor_by_name(request, "prompt_speech_tokens")
+        if prompt_pb is None:
+            raise ValueError("prompt_speech_tokens is required")
+        prompt = torch.utils.dlpack.from_dlpack(prompt_pb.to_dlpack()).to(self.device)
+        if prompt.dim() == 1:
+            prompt = prompt.unsqueeze(0)
+
+        pfeat = pb_utils.get_input_tensor_by_name(request, "prompt_speech_feat")
+        pfeat = torch.utils.dlpack.from_dlpack(pfeat.to_dlpack()).to(self.device)
+        if pfeat.dim() == 2:
+            pfeat = pfeat.unsqueeze(0)
+
+        spk = pb_utils.get_input_tensor_by_name(request, "prompt_spk_embedding")
+        spk = torch.utils.dlpack.from_dlpack(spk.to_dlpack()).to(self.device)
+        if spk.dim() == 1:
+            spk = spk.unsqueeze(0)
+
+        tok_off_pb = pb_utils.get_input_tensor_by_name(request, "token_offset")
+        fin_pb = pb_utils.get_input_tensor_by_name(request, "finalize")
+        # For B>1 batches BLS already slices mel per-request, so token_offset
+        # is uniform-zero placeholder — take first scalar without .item() crash.
+        tok_off = int(tok_off_pb.as_numpy().flatten()[0]) if tok_off_pb is not None else None
+        finalize = bool(fin_pb.as_numpy().flatten()[0]) if fin_pb is not None else True
+
+        return {
+            'target': target,           # [1, T_target]
+            'prompt': prompt,           # [1, T_prompt]
+            'pfeat':  pfeat,            # [1, T_pfeat, 80]
+            'spk':    spk,              # [1, 192]
+            'tok_off': tok_off,
+            'finalize': finalize,
+        }
+
+    def _make_response(self, mel, tok_off):
+        if tok_off is not None:
+            mel = mel[:, tok_off * self.token_mel_ratio:]
+        mel_out = mel.float().unsqueeze(0).cpu()  # [1, 80, T] for max_batch_size>1 compat
+        return pb_utils.InferenceResponse(
+            output_tensors=[pb_utils.Tensor.from_dlpack("mel", to_dlpack(mel_out))])
+
     def execute(self, requests):
+        """Tier-4 coordinator-friendly execute:
+        - BLS sends ONE pb_utils.InferenceRequest with batched tensors [B, ...].
+        - We dispatch via flow.inference_batched() (B>=1, uniform shape).
+        - Triton dynamic_batching with multiple requests fallback: group-by-shape.
+
+        token_offset slicing is done in BLS (since per-request offset varies inside
+        a batch). We always return full mel; BLS slices per-request.
+        """
         responses = []
-        for req_idx, request in enumerate(requests):
-            target_speech_tokens = pb_utils.get_input_tensor_by_name(
-                request, "target_speech_tokens")
-            target_speech_tokens = torch.utils.dlpack.from_dlpack(
-                target_speech_tokens.to_dlpack()).to(self.device)
-            if target_speech_tokens.dim() == 1:
-                target_speech_tokens = target_speech_tokens.unsqueeze(0)
-
-            # Optional inputs
-            prompt_speech_tokens_pb = pb_utils.get_input_tensor_by_name(
-                request, "prompt_speech_tokens")
-            if prompt_speech_tokens_pb is not None:
-                prompt_speech_tokens = torch.utils.dlpack.from_dlpack(
-                    prompt_speech_tokens_pb.to_dlpack()).to(self.device)
-                if prompt_speech_tokens.dim() == 1:
-                    prompt_speech_tokens = prompt_speech_tokens.unsqueeze(0)
-
-                prompt_speech_feat = pb_utils.get_input_tensor_by_name(
-                    request, "prompt_speech_feat")
-                prompt_speech_feat = torch.utils.dlpack.from_dlpack(
-                    prompt_speech_feat.to_dlpack()).to(self.device)
-                if prompt_speech_feat.dim() == 2:
-                    prompt_speech_feat = prompt_speech_feat.unsqueeze(0)  # [T, 80] -> [1, T, 80]
-
-                prompt_spk_embedding = pb_utils.get_input_tensor_by_name(
-                    request, "prompt_spk_embedding")
-                prompt_spk_embedding = torch.utils.dlpack.from_dlpack(
-                    prompt_spk_embedding.to_dlpack()).to(self.device)
-                if prompt_spk_embedding.dim() == 1:
-                    prompt_spk_embedding = prompt_spk_embedding.unsqueeze(0)
-            else:
-                raise ValueError("prompt_speech_tokens is required for CosyVoice3 token2wav")
-
-            token_offset_pb = pb_utils.get_input_tensor_by_name(request, "token_offset")
-            finalize_pb = pb_utils.get_input_tensor_by_name(request, "finalize")
-
-            token_offset = token_offset_pb.as_numpy().item() if token_offset_pb is not None else None
-            finalize = finalize_pb.as_numpy().item() if finalize_pb is not None else True
+        for request in requests:
+            d = self._extract_request(request)
+            B = d['target'].shape[0]
+            T_prompt = d['prompt'].shape[1]
+            T_target = d['target'].shape[1]
+            T_pfeat  = d['pfeat'].shape[1]
+            finalize = d['finalize']
             streaming = not finalize
 
             with torch.no_grad(), torch.cuda.amp.autocast(self.fp16):
-                mel, _ = self.flow.inference(
-                    token=target_speech_tokens,
-                    token_len=torch.tensor([target_speech_tokens.shape[1]], dtype=torch.int32).to(self.device),
-                    prompt_token=prompt_speech_tokens,
-                    prompt_token_len=torch.tensor([prompt_speech_tokens.shape[1]], dtype=torch.int32).to(self.device),
-                    prompt_feat=prompt_speech_feat,
-                    prompt_feat_len=torch.tensor([prompt_speech_feat.shape[1]], dtype=torch.int32).to(self.device),
-                    embedding=prompt_spk_embedding,
-                    streaming=streaming,
-                    finalize=finalize,
-                )
-
-            # Slice mel from token_offset if provided
-            if token_offset is not None:
-                mel = mel[:, :, token_offset * self.token_mel_ratio:]
-
-            # Output mel as [80, T] (squeeze batch dim for Triton)
-            mel_out = mel.squeeze(0).float()  # [80, T]
-            mel_out = mel_out.cpu() # otherwise, dlpack bug
-            mel_tensor = pb_utils.Tensor.from_dlpack("mel", to_dlpack(mel_out))
-            inference_response = pb_utils.InferenceResponse(output_tensors=[mel_tensor])
-            responses.append(inference_response)
-
+                if B == 1:
+                    mel, _ = self.flow.inference(
+                        token=d['target'],
+                        token_len=torch.tensor([T_target], dtype=torch.int32, device=self.device),
+                        prompt_token=d['prompt'],
+                        prompt_token_len=torch.tensor([T_prompt], dtype=torch.int32, device=self.device),
+                        prompt_feat=d['pfeat'],
+                        prompt_feat_len=torch.tensor([T_pfeat], dtype=torch.int32, device=self.device),
+                        embedding=d['spk'],
+                        streaming=streaming, finalize=finalize)
+                else:
+                    # Real GPU batching — uniform shape (BLS coordinator guarantees)
+                    lens_t = torch.tensor([T_target] * B, dtype=torch.int32, device=self.device)
+                    lens_p = torch.tensor([T_prompt] * B, dtype=torch.int32, device=self.device)
+                    lens_f = torch.tensor([T_pfeat]  * B, dtype=torch.int32, device=self.device)
+                    mel, _ = self.flow.inference_batched(
+                        token=d['target'], token_len=lens_t,
+                        prompt_token=d['prompt'], prompt_token_len=lens_p,
+                        prompt_feat=d['pfeat'], prompt_feat_len=lens_f,
+                        embedding=d['spk'],
+                        streaming=streaming, finalize=finalize)
+            # mel: [B, 80, T_mel] (B may be 1). Output to Triton — keep batch dim.
+            mel_out = mel.float().cpu()  # already has [B, 80, T] shape from flow
+            responses.append(pb_utils.InferenceResponse(
+                output_tensors=[pb_utils.Tensor.from_dlpack("mel", to_dlpack(mel_out))]))
         return responses

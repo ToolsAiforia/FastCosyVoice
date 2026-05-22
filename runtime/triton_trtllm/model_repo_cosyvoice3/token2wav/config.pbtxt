@@ -1,17 +1,19 @@
 name: "token2wav"
 backend: "python"
-max_batch_size: ${triton_max_batch_size}
+max_batch_size: 8
 
+# Tier-4: NO Triton dynamic_batching. BLS coordinator batches in-process
+# opportunistically (no queue_delay). Triton just routes single batched req
+# to one instance — straight execute().
 dynamic_batching {
-    max_queue_delay_microseconds: ${max_queue_delay_microseconds}
-    priority_levels: 100
-    default_priority_level: 100
+    max_queue_delay_microseconds: 0
+    preferred_batch_size: [ 2, 4, 8 ]
 }
 
 parameters [
   {
    key: "model_dir",
-   value: {string_value:"${model_dir}"}
+   value: {string_value:"/workspace/CosyVoice/runtime/triton_trtllm/Fun-CosyVoice3-0.5B-2512"}
   }
 ]
 
@@ -64,8 +66,43 @@ output [
 
 instance_group [
   {
-    count: 1
+    count: 4
     kind: KIND_GPU
     gpus: [ 0 ]
+  }
+]
+
+# Tier-3 warmup: TRT context cold start ~1200ms (N=1 p99 baseline). After warmup,
+# all kernel shapes for typical streaming chunk are JIT-cached → cold tail eliminated.
+# Synthetic input shape matches first streaming chunk: 9 target tokens + 25 prompt + 50 mel.
+model_warmup [
+  {
+    name: "warmup_streaming_chunk0"
+    count: 1
+    batch_size: 1
+    inputs {
+      key: "target_speech_tokens"
+      value: { data_type: TYPE_INT32, dims: [9], zero_data: true }
+    }
+    inputs {
+      key: "prompt_speech_tokens"
+      value: { data_type: TYPE_INT32, dims: [25], zero_data: true }
+    }
+    inputs {
+      key: "prompt_speech_feat"
+      value: { data_type: TYPE_FP16, dims: [50, 80], zero_data: true }
+    }
+    inputs {
+      key: "prompt_spk_embedding"
+      value: { data_type: TYPE_FP16, dims: [192], zero_data: true }
+    }
+    inputs {
+      key: "token_offset"
+      value: { data_type: TYPE_INT32, dims: [1], zero_data: true }
+    }
+    inputs {
+      key: "finalize"
+      value: { data_type: TYPE_BOOL, dims: [1], zero_data: true }
+    }
   }
 ]

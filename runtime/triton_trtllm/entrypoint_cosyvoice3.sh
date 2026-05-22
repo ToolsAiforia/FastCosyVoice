@@ -54,10 +54,13 @@ else
     echo "[0/4] Skipped: TRT-LLM engine already exists."
 fi
 
-# Remove pre-built TRT plans so they rebuild for this GPU
+# Remove pre-built TRT plans so they rebuild for this GPU.
+# Includes HiFT plans (built per-GPU sm tag, not portable across GPUs).
 rm -f "${MODEL_DIR}"/campplus.*.fp32.trt \
       "${MODEL_DIR}"/campplus.*.fp32.plan \
-      "${MODEL_DIR}"/flow.decoder.estimator.*.plan
+      "${MODEL_DIR}"/flow.decoder.estimator.*.plan \
+      "${MODEL_DIR}"/hift_decode_core.fp32.plan \
+      "${MODEL_DIR}"/hift_decode_core.fp32_B8.plan
 
 # --- Step 1: Fill model_repo templates ---
 echo "[1/4] Filling model repository templates..."
@@ -87,6 +90,36 @@ python3 /workdir/scripts/fill_template.py \
     "model_dir:${MODEL_DIR},triton_max_batch_size:${TRITON_MAX_BATCH_SIZE},max_queue_delay_microseconds:${MAX_QUEUE_DELAY}"
 
 echo "[1/4] Done."
+
+# --- Step 1.5: Build HiFT B-dynamic TRT plan (per-GPU, ~3-4 min cold) ---
+HIFT_B8_PLAN="${MODEL_DIR}/hift_decode_core.fp32_B8.plan"
+if [ ! -f "${HIFT_B8_PLAN}" ] || [ ! -s "${HIFT_B8_PLAN}" ]; then
+    echo "[1.5/4] Building HiFT B-dynamic TRT plan (this takes ~3-4 minutes on cold start)..."
+    python3 /workdir/scripts/build_hift_batched_trt.py --model-dir "${MODEL_DIR}"
+    echo "[1.5/4] Done."
+else
+    echo "[1.5/4] Skipped: HiFT B-dynamic plan already exists."
+fi
+
+# --- Step 1.6: Auto-bake spk2info.pt for default 'ref' speaker ---
+# Allows docker `up` to deliver a working stack out-of-box (test_streaming.py ref works).
+SPK_INFO="${MODEL_DIR}/spk2info.pt"
+REF_WAV="/workdir/reference.wav"
+REF_TEXT_FILE="/workdir/reference_text.txt"
+if [ ! -f "${SPK_INFO}" ] && [ -f "${REF_WAV}" ] && [ -f "${REF_TEXT_FILE}" ]; then
+    echo "[1.6/4] Baking spk2info.pt with default 'ref' speaker..."
+    python3 /workdir/generate_spk2info.py \
+        --model-dir "${MODEL_DIR}" \
+        --audio "${REF_WAV}" \
+        --reference-text "$(cat ${REF_TEXT_FILE})" \
+        --speaker-name ref \
+        --output "${SPK_INFO}"
+    echo "[1.6/4] Done."
+elif [ -f "${SPK_INFO}" ]; then
+    echo "[1.6/4] Skipped: spk2info.pt already exists."
+else
+    echo "[1.6/4] Skipped: no reference.wav bundled (zero-shot path only)."
+fi
 
 # --- Step 2: Start TensorRT-LLM inference server ---
 echo "[2/4] Starting TensorRT-LLM server on port ${LLM_PORT}..."

@@ -305,6 +305,31 @@ def get_args():
     )
 
     parser.add_argument(
+        "--arrival-rate",
+        type=float,
+        default=0.0,
+        help="If >0, override closed-loop with open-loop Poisson arrival at "
+             "this rate (req/s). Inter-arrival = exponential(1/rate). "
+             "Use with --duration-s for time-bounded benchmark.",
+    )
+    parser.add_argument(
+        "--arrival-distribution",
+        type=str,
+        default="closed-loop",
+        choices=["closed-loop", "poisson", "deterministic"],
+        help="Workload arrival pattern. closed-loop (default, current behavior): "
+             "N tasks fire requests back-to-back. poisson: open-loop Poisson with "
+             "exponential inter-arrival 1/arrival_rate. deterministic: fixed "
+             "interval 1/arrival_rate between requests.",
+    )
+    parser.add_argument(
+        "--duration-s",
+        type=float,
+        default=0.0,
+        help="Run open-loop bench for this duration (seconds). 0 = use max-samples.",
+    )
+
+    parser.add_argument(
         "--log-interval",
         type=int,
         default=5,
@@ -806,51 +831,95 @@ async def main():
     except Exception as e:
         print(f"Could not retrieve statistics before running tasks: {e}")
 
-    num_tasks = min(args.num_tasks, len(manifest_item_list))
-    manifest_item_list = split_data(manifest_item_list, num_tasks)
-
     os.makedirs(args.log_dir, exist_ok=True)
     args.use_spk2info_cache = args.use_spk2info_cache == "True" or args.use_spk2info_cache == "true"
-    tasks = []
-    start_time = time.time()
-    for i in range(num_tasks):
-        if args.mode == "offline":
-            task = asyncio.create_task(
-                send(
-                    manifest_item_list[i],
-                    name=f"task-{i}",
-                    triton_client=triton_client,
-                    protocol_client=protocol_client,
-                    log_interval=args.log_interval,
-                    model_name=args.model_name,
-                    audio_save_dir=args.log_dir,
-                    padding_duration=1,
-                    save_sample_rate=16000 if args.model_name == "spark_tts" else 24000,
-                    use_spk2info_cache=args.use_spk2info_cache,
-                    speaker_name=args.speaker_name,
-                )
-            )
-        elif args.mode == "streaming":
-            task = asyncio.create_task(
-                send_streaming(
-                    manifest_item_list[i],
-                    name=f"task-{i}",
-                    server_url=url,
-                    protocol_client=protocol_client,
-                    log_interval=args.log_interval,
-                    model_name=args.model_name,
-                    audio_save_dir=args.log_dir,
-                    padding_duration=10,
-                    save_sample_rate=16000 if args.model_name == "spark_tts" else 24000,
-                    chunk_overlap_duration=args.chunk_overlap_duration,
-                    use_spk2info_cache=args.use_spk2info_cache,
-                    speaker_name=args.speaker_name,
-                    warmup_requests=args.warmup_requests,
-                )
-            )
-        tasks.append(task)
 
-    ans_list = await asyncio.gather(*tasks)
+    # Open-loop Poisson / deterministic arrival path
+    if args.arrival_distribution in ("poisson", "deterministic") and args.arrival_rate > 0:
+        print(f"Open-loop arrival: distribution={args.arrival_distribution} rate={args.arrival_rate} req/s")
+        print(f"Duration: {args.duration_s}s" if args.duration_s > 0 else
+              f"Sending {len(manifest_item_list)} requests")
+        tasks = []
+        start_time = time.time()
+        request_idx = 0
+        while True:
+            if args.duration_s > 0:
+                if time.time() - start_time >= args.duration_s:
+                    break
+            elif request_idx >= len(manifest_item_list):
+                break
+
+            item = manifest_item_list[request_idx % len(manifest_item_list)]
+            request_idx += 1
+            if args.mode == "streaming":
+                task = asyncio.create_task(
+                    send_streaming(
+                        [item],
+                        name=f"task-{request_idx}",
+                        server_url=url,
+                        protocol_client=protocol_client,
+                        log_interval=args.log_interval,
+                        model_name=args.model_name,
+                        audio_save_dir=args.log_dir,
+                        padding_duration=10,
+                        save_sample_rate=24000,
+                        chunk_overlap_duration=args.chunk_overlap_duration,
+                        use_spk2info_cache=args.use_spk2info_cache,
+                        speaker_name=args.speaker_name,
+                        warmup_requests=0,
+                    )
+                )
+                tasks.append(task)
+            # inter-arrival sleep
+            if args.arrival_distribution == "poisson":
+                inter = float(np.random.exponential(1.0 / args.arrival_rate))
+            else:
+                inter = 1.0 / args.arrival_rate
+            await asyncio.sleep(inter)
+        print(f"Submitted {request_idx} requests in {time.time()-start_time:.1f}s. Awaiting completion...")
+        ans_list = await asyncio.gather(*tasks)
+    else:
+        num_tasks = min(args.num_tasks, len(manifest_item_list))
+        manifest_item_list = split_data(manifest_item_list, num_tasks)
+        tasks = []
+        start_time = time.time()
+        for i in range(num_tasks):
+            if args.mode == "offline":
+                task = asyncio.create_task(
+                    send(
+                        manifest_item_list[i],
+                        name=f"task-{i}",
+                        triton_client=triton_client,
+                        protocol_client=protocol_client,
+                        log_interval=args.log_interval,
+                        model_name=args.model_name,
+                        audio_save_dir=args.log_dir,
+                        padding_duration=1,
+                        save_sample_rate=16000 if args.model_name == "spark_tts" else 24000,
+                        use_spk2info_cache=args.use_spk2info_cache,
+                        speaker_name=args.speaker_name,
+                    )
+                )
+            elif args.mode == "streaming":
+                task = asyncio.create_task(
+                    send_streaming(
+                        manifest_item_list[i],
+                        name=f"task-{i}",
+                        server_url=url,
+                        protocol_client=protocol_client,
+                        log_interval=args.log_interval,
+                        model_name=args.model_name,
+                        audio_save_dir=args.log_dir,
+                        padding_duration=10,
+                        save_sample_rate=16000 if args.model_name == "spark_tts" else 24000,
+                        chunk_overlap_duration=args.chunk_overlap_duration,
+                        use_spk2info_cache=args.use_spk2info_cache,
+                        speaker_name=args.speaker_name,
+                        warmup_requests=args.warmup_requests,
+                    )
+                )
+            tasks.append(task)
+        ans_list = await asyncio.gather(*tasks)
 
     end_time = time.time()
     elapsed = end_time - start_time

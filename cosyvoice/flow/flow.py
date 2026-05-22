@@ -367,6 +367,7 @@ class CausalMaskedDiffWithDiT(torch.nn.Module):
                   embedding,
                   streaming,
                   finalize):
+        """B=1 inference (backwards-compatible). For B>1 use inference_batched()."""
         assert token.shape[0] == 1
         # xvec projection
         embedding = F.normalize(embedding, dim=1)
@@ -400,6 +401,77 @@ class CausalMaskedDiffWithDiT(torch.nn.Module):
             streaming=streaming
         )
         feat = feat[:, :, mel_len1:]
+        assert feat.shape[2] == mel_len2
+        return feat.float(), None
+
+    @torch.inference_mode()
+    def inference_batched(self,
+                          token,
+                          token_len,
+                          prompt_token,
+                          prompt_token_len,
+                          prompt_feat,
+                          prompt_feat_len,
+                          embedding,
+                          streaming,
+                          finalize):
+        """Homogeneous batched inference (Path B round-9).
+
+        Assumes all B rows in a batch share the SAME prompt_token_len, token_len,
+        and prompt_feat_len. Caller (token2wav/1/model.py:execute()) groups requests
+        by shape before calling. With identical lengths, no padding/mask gymnastics
+        are needed and all upstream B=1 logic generalizes naturally.
+
+        Returns: feat [B, output_size, mel_len2_per_request], None
+        """
+        B = token.shape[0]
+        # All-same-length assertion (caller's responsibility to group):
+        assert (prompt_token_len == prompt_token_len[0]).all(), \
+            f"inference_batched requires uniform prompt_token_len, got {prompt_token_len.tolist()}"
+        assert (token_len == token_len[0]).all(), \
+            f"inference_batched requires uniform token_len, got {token_len.tolist()}"
+        assert (prompt_feat_len == prompt_feat_len[0]).all(), \
+            f"inference_batched requires uniform prompt_feat_len, got {prompt_feat_len.tolist()}"
+
+        # xvec projection
+        embedding = F.normalize(embedding, dim=1)
+        embedding = self.spk_embed_affine_layer(embedding)
+
+        # concat prompt + target tokens (same shape across rows, so concat works naively)
+        token = torch.concat([prompt_token, token], dim=1)               # [B, T_prompt + T_target]
+        total_token_len = prompt_token_len + token_len                   # [B]
+        mask = (~make_pad_mask(total_token_len)).unsqueeze(-1).to(embedding)  # [B, T_total, 1]
+        token = self.input_embedding(torch.clamp(token, min=0)) * mask   # [B, T_total, input_size]
+
+        # pre_lookahead — for uniform lengths, [:, :-pre_lookahead_len] picks valid body per row
+        if finalize is True:
+            h = self.pre_lookahead_layer(token)
+        else:
+            h = self.pre_lookahead_layer(
+                token[:, :-self.pre_lookahead_len],
+                context=token[:, -self.pre_lookahead_len:],
+            )
+        h = h.repeat_interleave(self.token_mel_ratio, dim=1)             # [B, T_mel, output_size]
+        mel_len1 = prompt_feat.shape[1]                                  # uniform prompt mel len
+        mel_len2 = h.shape[1] - mel_len1                                 # uniform target mel len
+
+        # get conditions — broadcast across B rows
+        conds = torch.zeros([B, mel_len1 + mel_len2, self.output_size],
+                            device=token.device, dtype=h.dtype)
+        conds[:, :mel_len1] = prompt_feat                                # [B, T_pfeat, 80]
+        conds = conds.transpose(1, 2)                                    # [B, 80, T_total_mel]
+
+        # mel-side mask — same length for all rows
+        mask = (~make_pad_mask(torch.tensor([mel_len1 + mel_len2] * B))).to(h)  # [B, T_total_mel]
+        feat, _ = self.decoder(
+            mu=h.transpose(1, 2).contiguous(),                           # [B, output_size, T_total_mel]
+            mask=mask.unsqueeze(1),                                      # [B, 1, T_total_mel]
+            spks=embedding,                                              # [B, output_size]
+            cond=conds,
+            n_timesteps=self.n_timesteps,
+            streaming=streaming,
+        )
+        feat = feat[:, :, mel_len1:]                                     # [B, 80, mel_len2]
         assert feat.shape[2] == mel_len2
         return feat.float(), None
 

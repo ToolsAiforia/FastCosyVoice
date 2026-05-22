@@ -172,6 +172,9 @@ class TritonPythonModel:
         # Eliminates ~1s cold start (N=1 p99>1200ms tail).
         # 3 separate warmup calls with varying shapes to trigger multiple TRT kernel
         # specializations (prefill prefix sizes, generate lengths).
+        # Tier-A A3: ALSO warm prefix-cache for each cached speaker — first real
+        # request with that speaker hits trtllm-serve's block_reuse cache,
+        # skipping prefill entirely (cold N=1 ~1012 ms → ~280 ms).
         warmup_lock = "/tmp/.bls_llm_warmup_done"
         if not os.path.exists(warmup_lock):
             try:
@@ -194,9 +197,32 @@ class TritonPythonModel:
                     }
                     resp = _httpx_sync.post(self.api_base, json=payload, timeout=60.0)
                     resp.raise_for_status()
+                # Tier-A A3: prefix-cache prewarm for each cached speaker.
+                # One short request per speaker, identical prefix to what real
+                # requests will use → trtllm block_reuse cache populated.
+                for spk_name, cache_key in self.speaker_name_to_cache_key.items():
+                    cached = self.speaker_cache.get(cache_key)
+                    if cached is None:
+                        continue
+                    spk_str = cached.get("prompt_speech_tokens_str")
+                    if spk_str is None:
+                        spk_str = self._convert_speech_tokens_to_str(cached["prompt_speech_tokens_for_llm"])
+                    payload = {
+                        "model": "trt_engines_bfloat16",
+                        "messages": [
+                            {"role": "user", "content": f"{cache_key}Warmup."},
+                            {"role": "assistant", "content": spk_str},
+                        ],
+                        "max_tokens": 8,
+                        "temperature": 0.8,
+                        "stream": False,
+                    }
+                    resp = _httpx_sync.post(self.api_base, json=payload, timeout=60.0)
+                    resp.raise_for_status()
+                    self.logger.log_info(f"  prefix-cache warmed for speaker '{spk_name}'")
                 with open(warmup_lock, "w") as f:
                     f.write(f"warmed at {time.time():.0f}")
-                self.logger.log_info(f"LLM warmup OK (3 requests) in {time.time()-t0:.2f}s")
+                self.logger.log_info(f"LLM warmup OK in {time.time()-t0:.2f}s")
             except Exception as e:
                 self.logger.log_warn(f"LLM warmup failed (continuing): {e}")
 

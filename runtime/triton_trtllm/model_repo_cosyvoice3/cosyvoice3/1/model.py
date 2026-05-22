@@ -148,12 +148,17 @@ class TritonPythonModel:
             spk2info = torch.load(spk2info_path, map_location="cpu")
             for spk_name, spk_data in spk2info.items():
                 cache_key = spk_data["reference_text"]
-                self.speaker_cache[cache_key] = {
+                entry = {
                     "prompt_speech_tokens_for_llm": spk_data["prompt_speech_tokens_for_llm"],
                     "prompt_speech_tokens": spk_data["prompt_speech_tokens"],
                     "prompt_speech_feat": spk_data["prompt_speech_feat"].to(self.device),
                     "prompt_spk_embedding": spk_data["prompt_spk_embedding"].to(self.device),
                 }
+                # Tier-A A1: pre-baked LLM token string. Old spk2info entries
+                # without this field — fall back to runtime convert (slower).
+                if "prompt_speech_tokens_str" in spk_data:
+                    entry["prompt_speech_tokens_str"] = spk_data["prompt_speech_tokens_str"]
+                self.speaker_cache[cache_key] = entry
                 self.speaker_name_to_cache_key[spk_name] = cache_key
                 if self.default_speaker_key is None:
                     self.default_speaker_key = cache_key
@@ -234,6 +239,16 @@ class TritonPythonModel:
             speech_tokens = speech_tokens.cpu().numpy().flatten().tolist()
         return "".join(f"<|s_{int(tid)}|>" for tid in speech_tokens)
 
+    def _get_cached_prompt_str(self, cache_key, prompt_speech_tokens):
+        """Tier-A A1: return baked LLM token string from spk2info cache if
+        available, else fallback to runtime conversion. Saves ~1-3 ms per
+        request on cached-speaker hot path (was 252 string formats per call)."""
+        if cache_key in self.speaker_cache:
+            cached = self.speaker_cache[cache_key]
+            if 'prompt_speech_tokens_str' in cached:
+                return cached['prompt_speech_tokens_str']
+        return self._convert_speech_tokens_to_str(prompt_speech_tokens)
+
     def _extract_speech_feat(self, speech):
         """Extract mel spectrogram from 24kHz speech for flow prompt."""
         speech_feat = mel_spectrogram(speech).squeeze(dim=0).transpose(0, 1)
@@ -243,16 +258,20 @@ class TritonPythonModel:
     async def forward_llm_streaming(self, target_text, reference_text, prompt_speech_tokens):
         """Async generator: stream LLM tokens via httpx SSE."""
         full_text = f"{reference_text}{target_text}"
-        prompt_speech_tokens_str = self._convert_speech_tokens_to_str(prompt_speech_tokens)
+        # Tier-A A1: cached str lookup (hot path optimization)
+        prompt_speech_tokens_str = self._get_cached_prompt_str(reference_text, prompt_speech_tokens)
 
         chat = [
             {"role": "user", "content": full_text},
             {"role": "assistant", "content": prompt_speech_tokens_str}
         ]
+        # Tier-A A6: max_tokens 400→200. Voice-chat texts produce ~50-150 speech
+        # tokens. 200 is well above typical, but smaller than 400 → less LLM
+        # scheduler memory allocation overhead. Defensive cap still applies.
         payload = {
             "model": "trt_engines_bfloat16",
             "messages": chat,
-            "max_tokens": 400,
+            "max_tokens": 200,
             "temperature": 0.8,
             "top_p": 0.95,
             "top_k": 50,
@@ -298,7 +317,8 @@ class TritonPythonModel:
     async def forward_llm_offline(self, target_text, reference_text, prompt_speech_tokens):
         """Non-streaming LLM call, returns all speech token IDs at once."""
         full_text = f"{reference_text}{target_text}"
-        prompt_speech_tokens_str = self._convert_speech_tokens_to_str(prompt_speech_tokens)
+        # Tier-A A1: cached str lookup
+        prompt_speech_tokens_str = self._get_cached_prompt_str(reference_text, prompt_speech_tokens)
 
         chat = [
             {"role": "user", "content": full_text},

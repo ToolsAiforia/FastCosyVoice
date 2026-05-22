@@ -105,11 +105,17 @@ def build_spk_info(waveform_16k, tokenizer_model, campplus_path):
     prompt_speech_feat = speech_feat[:, : 2 * token_len].contiguous().half()
     prompt_speech_tokens = prompt_speech_tokens[:, :token_len].contiguous()
 
+    # 5. Pre-baked LLM string representation — saves per-request formatting
+    #    in BLS forward_llm_streaming (Tier-A A1: was ~1-3 ms per call hot path).
+    tokens_for_llm_list = prompt_speech_tokens_for_llm.cpu().numpy().flatten().tolist()
+    prompt_speech_tokens_str = "".join(f"<|s_{int(tid)}|>" for tid in tokens_for_llm_list)
+
     return {
         "prompt_speech_tokens_for_llm": prompt_speech_tokens_for_llm,
         "prompt_speech_tokens": prompt_speech_tokens,
         "prompt_speech_feat": prompt_speech_feat,
         "prompt_spk_embedding": prompt_spk_embedding,
+        "prompt_speech_tokens_str": prompt_speech_tokens_str,
     }
 
 

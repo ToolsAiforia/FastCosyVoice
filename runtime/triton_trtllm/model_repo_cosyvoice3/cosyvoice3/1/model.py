@@ -473,10 +473,14 @@ class TritonPythonModel:
             # Use shape [B, 1] (Triton expects batch dim).
             finalize_pb = pb_utils.Tensor("finalize",
                 np.array([[finalize_val]] * B, dtype=np.bool_))
-            # token_offset is per-request; we slice in BLS after receiving mel.
-            # Use 0 dummy to make token2wav happy (slicing in token2wav is no-op for 0).
+            # token_offset: BLS slices per-request after receiving mel, so the
+            # value sent here is NOT used by token2wav for slicing. BUT token2wav
+            # uses it as a first-chunk indicator (Tier-B B2 fast path: n=5 if 0).
+            # shape_key includes target.shape[1] which IS chunk_index-correlated,
+            # so all items in batch share the same tok_off value safely.
+            tok_off_val = int(batch[0].get('tok_off') or 0)
             tok_off_pb = pb_utils.Tensor("token_offset",
-                np.array([[0]] * B, dtype=np.int32))
+                np.array([[tok_off_val]] * B, dtype=np.int32))
 
             inputs = [target_pb, prompt_pb, pfeat_pb, spk_pb, tok_off_pb, finalize_pb]
             ir = pb_utils.InferenceRequest(

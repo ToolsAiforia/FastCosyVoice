@@ -306,6 +306,10 @@ class TritonPythonModel:
 
         token_offset slicing is done in BLS (since per-request offset varies inside
         a batch). We always return full mel; BLS slices per-request.
+
+        Tier-B B2: first chunk (token_offset==0, non-finalize) uses reduced
+        n_timesteps=5 instead of default 10. Halves DiT compute on first chunk
+        only — direct TTFA win. Subsequent chunks keep full quality at n=10.
         """
         responses = []
         for request in requests:
@@ -316,6 +320,9 @@ class TritonPythonModel:
             T_pfeat  = d['pfeat'].shape[1]
             finalize = d['finalize']
             streaming = not finalize
+            # B2: first-chunk fast path — only for streaming (non-finalize),
+            # first chunk has tok_off==0
+            n_timesteps_override = 5 if (not finalize and d.get('tok_off') == 0) else None
 
             with torch.no_grad(), torch.cuda.amp.autocast(self.fp16):
                 if B == 1:
@@ -327,7 +334,8 @@ class TritonPythonModel:
                         prompt_feat=d['pfeat'],
                         prompt_feat_len=torch.tensor([T_pfeat], dtype=torch.int32, device=self.device),
                         embedding=d['spk'],
-                        streaming=streaming, finalize=finalize)
+                        streaming=streaming, finalize=finalize,
+                        n_timesteps_override=n_timesteps_override)
                 else:
                     # Real GPU batching — uniform shape (BLS coordinator guarantees)
                     lens_t = torch.tensor([T_target] * B, dtype=torch.int32, device=self.device)
@@ -338,7 +346,8 @@ class TritonPythonModel:
                         prompt_token=d['prompt'], prompt_token_len=lens_p,
                         prompt_feat=d['pfeat'], prompt_feat_len=lens_f,
                         embedding=d['spk'],
-                        streaming=streaming, finalize=finalize)
+                        streaming=streaming, finalize=finalize,
+                        n_timesteps_override=n_timesteps_override)
             # mel: [B, 80, T_mel] (B may be 1). Output to Triton — keep batch dim.
             mel_out = mel.float().cpu()  # already has [B, 80, T] shape from flow
             responses.append(pb_utils.InferenceResponse(

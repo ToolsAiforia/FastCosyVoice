@@ -366,8 +366,11 @@ class CausalMaskedDiffWithDiT(torch.nn.Module):
                   prompt_feat_len,
                   embedding,
                   streaming,
-                  finalize):
-        """B=1 inference (backwards-compatible). For B>1 use inference_batched()."""
+                  finalize,
+                  n_timesteps_override=None):
+        """B=1 inference (backwards-compatible). For B>1 use inference_batched().
+        Tier-B B2: n_timesteps_override allows caller to request fewer diffusion
+        steps for the first streaming chunk (TTFA-only optimization)."""
         assert token.shape[0] == 1
         # xvec projection
         embedding = F.normalize(embedding, dim=1)
@@ -392,12 +395,13 @@ class CausalMaskedDiffWithDiT(torch.nn.Module):
         conds = conds.transpose(1, 2)
 
         mask = (~make_pad_mask(torch.tensor([mel_len1 + mel_len2]))).to(h)
+        n_timesteps = n_timesteps_override if n_timesteps_override is not None else self.n_timesteps
         feat, _ = self.decoder(
             mu=h.transpose(1, 2).contiguous(),
             mask=mask.unsqueeze(1),
             spks=embedding,
             cond=conds,
-            n_timesteps=self.n_timesteps,
+            n_timesteps=n_timesteps,
             streaming=streaming
         )
         feat = feat[:, :, mel_len1:]
@@ -414,7 +418,8 @@ class CausalMaskedDiffWithDiT(torch.nn.Module):
                           prompt_feat_len,
                           embedding,
                           streaming,
-                          finalize):
+                          finalize,
+                          n_timesteps_override=None):
         """Homogeneous batched inference (Path B round-9).
 
         Assumes all B rows in a batch share the SAME prompt_token_len, token_len,
@@ -463,12 +468,13 @@ class CausalMaskedDiffWithDiT(torch.nn.Module):
 
         # mel-side mask — same length for all rows
         mask = (~make_pad_mask(torch.tensor([mel_len1 + mel_len2] * B))).to(h)  # [B, T_total_mel]
+        n_timesteps = n_timesteps_override if n_timesteps_override is not None else self.n_timesteps
         feat, _ = self.decoder(
             mu=h.transpose(1, 2).contiguous(),                           # [B, output_size, T_total_mel]
             mask=mask.unsqueeze(1),                                      # [B, 1, T_total_mel]
             spks=embedding,                                              # [B, output_size]
             cond=conds,
-            n_timesteps=self.n_timesteps,
+            n_timesteps=n_timesteps,
             streaming=streaming,
         )
         feat = feat[:, :, mel_len1:]                                     # [B, 80, mel_len2]

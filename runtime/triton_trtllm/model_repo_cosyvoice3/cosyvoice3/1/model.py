@@ -54,14 +54,18 @@ class TritonPythonModel:
         self.device = torch.device("cuda")
         self.decoupled = pb_utils.using_decoupled_model_transaction_policy(self.model_config)
 
-        # Streaming config
+        # Streaming config (L40S round-5 production: TTFA −150 ms vs upstream)
+        # round-9 SYNC inherited these settings from working tree but they
+        # weren't committed to 3a4eb64; restoring here.
         self.token_frame_rate = 25
-        self.flow_pre_lookahead_len = 3
-        self.token_hop_len = 15
+        self.flow_pre_lookahead_len = 1   # was 3; round-5 step 10 — TTFA −15-25 ms
+        self.token_hop_len = 8            # was 15; round-5 step 9 — TTFA −150 ms
         self.token_mel_ratio = 2
         self.dynamic_chunk_strategy = model_params.get("dynamic_chunk_strategy", "exponential")
         self.logger.log_info(f"CosyVoice3 BLS initialized, decoupled={self.decoupled}, "
-                             f"chunk_strategy={self.dynamic_chunk_strategy}")
+                             f"chunk_strategy={self.dynamic_chunk_strategy}, "
+                             f"token_hop_len={self.token_hop_len}, "
+                             f"flow_pre_lookahead_len={self.flow_pre_lookahead_len}")
 
         # HTTP client for remote LLM (trtllm-serve default port: 8000)
         self.http_client = httpx.AsyncClient()
@@ -93,6 +97,39 @@ class TritonPythonModel:
             self.logger.log_info(f"Available speaker names: {list(self.speaker_name_to_cache_key.keys())}")
         else:
             self.logger.log_info("No spk2info.pt found, speaker cache starts empty")
+
+        # Tier-3 warmup: prime trtllm-serve + downstream TRT kernels with
+        # realistic-shape requests. Without warmup, first real request pays
+        # ~1s cold start tail (LLM prefill + DiT/HiFT TRT JIT kernel compile).
+        # 3 synthetic requests with varying generate lengths trigger multiple
+        # kernel specializations.
+        warmup_lock = "/tmp/.bls_llm_warmup_done"
+        if not os.path.exists(warmup_lock):
+            try:
+                import httpx as _httpx_sync
+                # Realistic-sized assistant content (25 speech tokens ≈ prod prompt size)
+                spk_tokens_sample = "".join(f"<|s_{i*7 % 6500}|>" for i in range(25))
+                ref_text = "You are a helpful assistant.<|endofprompt|>Hello world, this is a warmup."
+                self.logger.log_info("Warming up trtllm-serve (3 dummy requests)...")
+                t0 = time.time()
+                for i, max_tok in enumerate([10, 30, 100]):
+                    payload = {
+                        "model": "trt_engines_bfloat16",
+                        "messages": [
+                            {"role": "user", "content": ref_text + f" Variant {i}."},
+                            {"role": "assistant", "content": spk_tokens_sample},
+                        ],
+                        "max_tokens": max_tok,
+                        "temperature": 0.8,
+                        "stream": False,
+                    }
+                    resp = _httpx_sync.post(self.api_base, json=payload, timeout=60.0)
+                    resp.raise_for_status()
+                with open(warmup_lock, "w") as f:
+                    f.write(f"warmed at {time.time():.0f}")
+                self.logger.log_info(f"LLM warmup OK (3 requests) in {time.time()-t0:.2f}s")
+            except Exception as e:
+                self.logger.log_warn(f"LLM warmup failed (continuing): {e}")
 
     def _convert_speech_tokens_to_str(self, speech_tokens):
         """Convert speech token IDs tensor/list to string like '<|s_N|>'."""
@@ -372,9 +409,15 @@ class TritonPythonModel:
             token_offset = 0
             chunk_index = 0
             this_token_hop_len = self.token_hop_len
-            accumulated_mel = None
             speech_offset = 0
             start_time = time.time()
+
+            # Tier-3 H2: pre-allocated mel buffer. Avoid O(N²) torch.cat at every
+            # chunk. 800 frames ≈ 16 s @ 50 Hz token-mel rate.
+            MAX_MEL_FRAMES = 800
+            accumulated_mel = torch.zeros(
+                1, 80, MAX_MEL_FRAMES, dtype=torch.float32, device=self.device)
+            mel_len = 0
 
             async for generated_id in self.forward_llm_streaming(
                 target_text=target_text,
@@ -402,16 +445,23 @@ class TritonPythonModel:
                         priority=chunk_index + 1,
                     )
 
-                    # Accumulate mel
+                    # Accumulate mel in pre-alloc buffer (H2 — no torch.cat O(N²))
                     if mel_chunk.dim() == 2:
                         mel_chunk = mel_chunk.unsqueeze(0)
-                    if accumulated_mel is None:
-                        accumulated_mel = mel_chunk
-                    else:
-                        accumulated_mel = torch.cat([accumulated_mel, mel_chunk], dim=2)
+                    chunk_T = mel_chunk.shape[2]
+                    if mel_len + chunk_T > MAX_MEL_FRAMES:
+                        # Defensive 2× grow if buffer overflows
+                        new_buf = torch.zeros(1, 80, MAX_MEL_FRAMES * 2,
+                                              dtype=torch.float32, device=self.device)
+                        new_buf[:, :, :mel_len] = accumulated_mel[:, :, :mel_len]
+                        accumulated_mel = new_buf
+                        MAX_MEL_FRAMES *= 2
+                    accumulated_mel[:, :, mel_len:mel_len + chunk_T] = mel_chunk.to(torch.float32)
+                    mel_len += chunk_T
 
-                    # Call vocoder
-                    speech = await self.forward_vocoder(accumulated_mel, finalize=False)
+                    # Call vocoder on valid slice (contiguous since slice is a view)
+                    speech = await self.forward_vocoder(
+                        accumulated_mel[:, :, :mel_len].contiguous(), finalize=False)
 
                     # Extract new speech
                     new_speech = speech[:, speech_offset:]
@@ -462,12 +512,18 @@ class TritonPythonModel:
 
                 if mel_chunk.dim() == 2:
                     mel_chunk = mel_chunk.unsqueeze(0)
-                if accumulated_mel is None:
-                    accumulated_mel = mel_chunk
-                else:
-                    accumulated_mel = torch.cat([accumulated_mel, mel_chunk], dim=2)
+                chunk_T = mel_chunk.shape[2]
+                if mel_len + chunk_T > MAX_MEL_FRAMES:
+                    new_buf = torch.zeros(1, 80, MAX_MEL_FRAMES * 2,
+                                          dtype=torch.float32, device=self.device)
+                    new_buf[:, :, :mel_len] = accumulated_mel[:, :, :mel_len]
+                    accumulated_mel = new_buf
+                    MAX_MEL_FRAMES *= 2
+                accumulated_mel[:, :, mel_len:mel_len + chunk_T] = mel_chunk.to(torch.float32)
+                mel_len += chunk_T
 
-                speech = await self.forward_vocoder(accumulated_mel, finalize=True)
+                speech = await self.forward_vocoder(
+                    accumulated_mel[:, :, :mel_len].contiguous(), finalize=True)
 
                 new_speech = speech[:, speech_offset:]
                 if new_speech.shape[1] > 0:

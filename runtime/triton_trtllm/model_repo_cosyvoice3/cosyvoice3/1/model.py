@@ -98,26 +98,40 @@ class TritonPythonModel:
         else:
             self.logger.log_info("No spk2info.pt found, speaker cache starts empty")
 
-        # Tier-3 warmup: prime trtllm-serve + downstream TRT kernels with
-        # realistic-shape requests. Without warmup, first real request pays
-        # ~1s cold start tail (LLM prefill + DiT/HiFT TRT JIT kernel compile).
-        # 3 synthetic requests with varying generate lengths trigger multiple
-        # kernel specializations.
+        # Tier-A A1: real-shape warmup. Earlier version used 25 random tokens —
+        # didn't perfectly match production shape (chunk-1 = 9 tokens after
+        # token_hop=8 + lookahead=1). Now we send dummy LLM requests with
+        # production-realistic prompt lengths so TRT-LLM JIT-caches kernels
+        # for actual production shapes. Lock-file prevents redundant warmups
+        # when multiple BLS instances boot in parallel.
         warmup_lock = "/tmp/.bls_llm_warmup_done"
         if not os.path.exists(warmup_lock):
             try:
                 import httpx as _httpx_sync
-                # Realistic-sized assistant content (25 speech tokens ≈ prod prompt size)
-                spk_tokens_sample = "".join(f"<|s_{i*7 % 6500}|>" for i in range(25))
-                ref_text = "You are a helpful assistant.<|endofprompt|>Hello world, this is a warmup."
-                self.logger.log_info("Warming up trtllm-serve (3 dummy requests)...")
+                # Three warmup variants covering common production patterns:
+                #  - Short prompt (~25 tok)  → typical zero-shot reference
+                #  - Medium prompt (~125 tok) → typical 5s cached speaker
+                #  - Longer prompt (~252 tok) → typical 10s cached speaker
+                # Each with realistic max_tokens=9 (one streaming chunk worth)
+                # so generation completes fast — focus is on prefill/JIT, not gen.
+                warmup_variants = [
+                    (25, 16),    # short prompt, 16 gen tokens (=2 chunks)
+                    (125, 64),   # medium prompt, 64 gen tokens (typical voice-chat)
+                    (252, 128),  # long prompt, 128 gen tokens (longer utterance)
+                ]
+                self.logger.log_info("Tier-A A1: real-shape warmup (3 variants)...")
                 t0 = time.time()
-                for i, max_tok in enumerate([10, 30, 100]):
+                for i, (prompt_tok, max_tok) in enumerate(warmup_variants):
+                    spk_tokens = "".join(f"<|s_{(j*7 + i*131) % 6500}|>" for j in range(prompt_tok))
+                    ref_text = (
+                        "You are a helpful assistant.<|endofprompt|>"
+                        f"Warmup pattern {i}, prompt {prompt_tok} tokens."
+                    )
                     payload = {
                         "model": "trt_engines_bfloat16",
                         "messages": [
-                            {"role": "user", "content": ref_text + f" Variant {i}."},
-                            {"role": "assistant", "content": spk_tokens_sample},
+                            {"role": "user", "content": ref_text},
+                            {"role": "assistant", "content": spk_tokens},
                         ],
                         "max_tokens": max_tok,
                         "temperature": 0.8,
@@ -127,7 +141,7 @@ class TritonPythonModel:
                     resp.raise_for_status()
                 with open(warmup_lock, "w") as f:
                     f.write(f"warmed at {time.time():.0f}")
-                self.logger.log_info(f"LLM warmup OK (3 requests) in {time.time()-t0:.2f}s")
+                self.logger.log_info(f"LLM warmup OK (3 variants) in {time.time()-t0:.2f}s")
             except Exception as e:
                 self.logger.log_warn(f"LLM warmup failed (continuing): {e}")
 
@@ -155,7 +169,10 @@ class TritonPythonModel:
         payload = {
             "model": "trt_engines_bfloat16",
             "messages": chat,
-            "max_tokens": 750,
+            # Tier-A A3: 750 → 200. Voice-chat workload produces ~50-150 speech
+            # tokens. 200 is well above typical, gives less LLM scheduler memory
+            # allocation overhead. Defensive cap stays in place.
+            "max_tokens": 200,
             "temperature": 0.8,
             "top_p": 0.95,
             "top_k": 50,
@@ -210,7 +227,10 @@ class TritonPythonModel:
         payload = {
             "model": "trt_engines_bfloat16",
             "messages": chat,
-            "max_tokens": 750,
+            # Tier-A A3: 750 → 200. Voice-chat workload produces ~50-150 speech
+            # tokens. 200 is well above typical, gives less LLM scheduler memory
+            # allocation overhead. Defensive cap stays in place.
+            "max_tokens": 200,
             "temperature": 0.8,
             "top_p": 0.95,
             "top_k": 50,

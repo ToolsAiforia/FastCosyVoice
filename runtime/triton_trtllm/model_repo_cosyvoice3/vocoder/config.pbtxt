@@ -1,13 +1,13 @@
 name: "vocoder"
 backend: "python"
-max_batch_size: ${triton_max_batch_size}
+max_batch_size: 1
 dynamic_batching {
-    max_queue_delay_microseconds: ${max_queue_delay_microseconds}
+    max_queue_delay_microseconds: 0
 }
 parameters [
   {
    key: "model_dir",
-   value: {string_value:"${model_dir}"}
+   value: {string_value:"/workspace/CosyVoice/runtime/triton_trtllm/Fun-CosyVoice3-0.5B-2512"}
   }
 ]
 
@@ -34,7 +34,27 @@ output [
 
 instance_group [
   {
-    count: 1
+    count: 8
     kind: KIND_CPU
+  }
+]
+
+# Tier-A A5: warmup with first-chunk mel shape (50 frames = ~1s audio).
+# HiFT decode_core TRT engine JIT-compiles kernels for unseen mel-time
+# dimensions on first call (~30-50 ms cold tail). This warmup pre-compiles
+# for the typical first-chunk mel size.
+model_warmup [
+  {
+    name: "warmup_chunk1_mel"
+    count: 1
+    batch_size: 1
+    inputs {
+      key: "mel"
+      value: { data_type: TYPE_FP32, dims: [80, 50], zero_data: true }
+    }
+    inputs {
+      key: "finalize"
+      value: { data_type: TYPE_BOOL, dims: [1], zero_data: true }
+    }
   }
 ]

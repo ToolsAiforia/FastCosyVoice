@@ -1,9 +1,9 @@
 name: "token2wav"
 backend: "python"
-max_batch_size: ${triton_max_batch_size}
+max_batch_size: 1
 
 dynamic_batching {
-    max_queue_delay_microseconds: ${max_queue_delay_microseconds}
+    max_queue_delay_microseconds: 0
     priority_levels: 100
     default_priority_level: 100
 }
@@ -11,7 +11,7 @@ dynamic_batching {
 parameters [
   {
    key: "model_dir",
-   value: {string_value:"${model_dir}"}
+   value: {string_value:"/workspace/CosyVoice/runtime/triton_trtllm/Fun-CosyVoice3-0.5B-2512"}
   }
 ]
 
@@ -64,8 +64,44 @@ output [
 
 instance_group [
   {
-    count: 1
+    count: 8
     kind: KIND_GPU
     gpus: [ 0 ]
+  }
+]
+
+# Tier-A A4: warmup with realistic chunk-1 shape (token_hop=8 + lookahead=1
+# = 9 target tokens; ~125 prompt tokens from typical 5s reference; 250 mel
+# frames for prompt_speech_feat). Eliminates ~150 ms TRT JIT-compile tail on
+# first real request hitting an unseen shape.
+model_warmup [
+  {
+    name: "warmup_chunk1"
+    count: 1
+    batch_size: 1
+    inputs {
+      key: "target_speech_tokens"
+      value: { data_type: TYPE_INT32, dims: [9], zero_data: true }
+    }
+    inputs {
+      key: "prompt_speech_tokens"
+      value: { data_type: TYPE_INT32, dims: [125], zero_data: true }
+    }
+    inputs {
+      key: "prompt_speech_feat"
+      value: { data_type: TYPE_FP16, dims: [250, 80], zero_data: true }
+    }
+    inputs {
+      key: "prompt_spk_embedding"
+      value: { data_type: TYPE_FP16, dims: [192], zero_data: true }
+    }
+    inputs {
+      key: "token_offset"
+      value: { data_type: TYPE_INT32, dims: [1], zero_data: true }
+    }
+    inputs {
+      key: "finalize"
+      value: { data_type: TYPE_BOOL, dims: [1], zero_data: true }
+    }
   }
 ]

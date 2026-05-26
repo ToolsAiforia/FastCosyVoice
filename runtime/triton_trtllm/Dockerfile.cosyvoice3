@@ -4,7 +4,7 @@ RUN pip install --no-cache-dir cython && \
     pip install --no-cache-dir --no-build-isolation --no-deps matcha-tts && \
     pip install --no-cache-dir "s3tokenizer>=0.3" x-transformers && \
     pip install --no-cache-dir --no-deps \
-      "git+https://github.com/ToolsAiforia/FastCosyVoice@v0.0.1"
+      "git+https://github.com/ToolsAiforia/FastCosyVoice@round-9-stable"
 
 # WORKDIR /workspace gets overwritten by runpod
 WORKDIR /workdir

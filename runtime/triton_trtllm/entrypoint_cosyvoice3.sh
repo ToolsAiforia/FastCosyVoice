@@ -59,6 +59,19 @@ rm -f "${MODEL_DIR}"/campplus.*.fp32.trt \
       "${MODEL_DIR}"/campplus.*.fp32.plan \
       "${MODEL_DIR}"/flow.decoder.estimator.*.plan
 
+# --- Step 0.5: Export hift_decode_core.onnx if missing ---
+# HF model repo does NOT ship this ONNX (subgraph extracted from hift.pt).
+# Export takes ~5 s, idempotent (skipped if file present).
+if [ ! -f "${MODEL_DIR}/hift_decode_core.onnx" ]; then
+    echo "[0.5/4] Exporting hift_decode_core.onnx from hift.pt..."
+    # cosyvoice package is pip-installed in site-packages — no --cosyvoice-root needed.
+    python3 /workdir/scripts/export_hift_trt.py \
+        --model-dir "${MODEL_DIR}"
+    echo "[0.5/4] Done."
+else
+    echo "[0.5/4] Skipped: hift_decode_core.onnx already exists."
+fi
+
 # --- Step 1: Fill model_repo templates ---
 echo "[1/4] Filling model repository templates..."
 

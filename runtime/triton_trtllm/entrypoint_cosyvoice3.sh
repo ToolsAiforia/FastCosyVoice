@@ -72,6 +72,12 @@ else
     echo "[0.5/4] Skipped: hift_decode_core.onnx already exists."
 fi
 
+# round-9-stable token2wav/vocoder config.pbtxt hardcode model_dir as
+# /workspace/CosyVoice/runtime/triton_trtllm/Fun-CosyVoice3-0.5B-2512 (legacy from
+# git-clone-bootstrap container). Symlink, чтобы model.py нашёл yaml/checkpoints.
+mkdir -p /workspace/CosyVoice/runtime/triton_trtllm
+ln -sfn "${MODEL_DIR}" /workspace/CosyVoice/runtime/triton_trtllm/Fun-CosyVoice3-0.5B-2512
+
 # --- Step 1: Fill model_repo templates ---
 echo "[1/4] Filling model repository templates..."
 
@@ -83,13 +89,8 @@ python3 /workdir/scripts/fill_template.py \
 LLM_API_BASE="http://localhost:${LLM_PORT}/v1/chat/completions"
 sed -i "s|LLM_API_BASE_PLACEHOLDER|${LLM_API_BASE}|g" "${MODEL_REPO_DIR}/cosyvoice3/config.pbtxt"
 
-python3 /workdir/scripts/fill_template.py \
-    -i "${MODEL_REPO_DIR}/token2wav/config.pbtxt" \
-    "model_dir:${MODEL_DIR},triton_max_batch_size:${TRITON_MAX_BATCH_SIZE},max_queue_delay_microseconds:${MAX_QUEUE_DELAY}"
-
-python3 /workdir/scripts/fill_template.py \
-    -i "${MODEL_REPO_DIR}/vocoder/config.pbtxt" \
-    "model_dir:${MODEL_DIR},triton_max_batch_size:${TRITON_MAX_BATCH_SIZE},max_queue_delay_microseconds:${MAX_QUEUE_DELAY}"
+# round-9-stable: token2wav и vocoder config.pbtxt уже hardcoded
+# (max_batch_size: 1, без placeholder'ов) — fill_template для них skip'аем.
 
 python3 /workdir/scripts/fill_template.py \
     -i "${MODEL_REPO_DIR}/audio_tokenizer/config.pbtxt" \

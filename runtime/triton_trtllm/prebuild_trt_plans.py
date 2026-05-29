@@ -134,12 +134,127 @@ def build_dit_plan(model_dir: str) -> None:
     logger.info(f"Built DiT plan: {trt_path} ({os.path.getsize(trt_path) // (1024*1024)} MB)")
 
 
-def build_hift_plans(model_dir: str) -> None:
-    """Build HiFT layer-mixed + FP32 fallback plans.
+def _build_hift_fp32_trt(plan_path: str, onnx_path: str) -> None:
+    """Inline copy of vocoder/1/model.py:_build_hift_fp32_trt (can't import — top-level
+    triton_python_backend_utils import in model.py fails outside Triton stub)."""
+    import tensorrt as trt
+    logger.info(f"Building HiFT FP32 TRT plan from {os.path.basename(onnx_path)}...")
+    trt_logger = trt.Logger(trt.Logger.WARNING)
+    network_flags = 1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
+    builder = trt.Builder(trt_logger)
+    network = builder.create_network(network_flags)
+    parser = trt.OnnxParser(network, trt_logger)
+    config = builder.create_builder_config()
+    config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 1 << 33)
+    if hasattr(trt.BuilderFlag, "TF32"):
+        config.set_flag(trt.BuilderFlag.TF32)
 
-    Imports _build_hift_layer_mixed_trt and _build_hift_fp32_trt from
-    vocoder/1/model.py (module-level functions in round-9-stable).
-    """
+    with open(onnx_path, "rb") as f:
+        if not parser.parse(f.read()):
+            for i in range(parser.num_errors):
+                logger.error(parser.get_error(i))
+            raise ValueError(f"failed to parse {onnx_path}")
+
+    profile = builder.create_optimization_profile()
+    profile.set_shape("x_pre",  (1, 512, 1),    (1, 512, 16),  (1, 512, 2500))
+    profile.set_shape("s_stft", (1, 18, 121),   (1, 18, 1921), (1, 18, 300001))
+    config.add_optimization_profile(profile)
+
+    engine_bytes = builder.build_serialized_network(network, config)
+    if engine_bytes is None:
+        raise RuntimeError("HiFT FP32 build returned None")
+    tmp = plan_path + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(bytes(engine_bytes))
+    os.replace(tmp, plan_path)
+    logger.info(f"Built {plan_path} ({os.path.getsize(plan_path)//(1024*1024)} MB)")
+
+
+def _build_hift_layer_mixed_trt(plan_path: str, onnx_path: str) -> None:
+    """Inline copy of vocoder/1/model.py:_build_hift_layer_mixed_trt (see _build_hift_fp32_trt
+    note). FP16 default + FP32 на Snake activations (Sin/Pow/Reciprocal) и Norm — иначе
+    pure-FP16 даёт 100 % clipping."""
+    import tensorrt as trt
+    logger.info(f"Building HiFT layer-mixed TRT plan from {os.path.basename(onnx_path)}")
+
+    trt_logger = trt.Logger(trt.Logger.WARNING)
+    network_flags = 1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
+    builder = trt.Builder(trt_logger)
+    network = builder.create_network(network_flags)
+    parser = trt.OnnxParser(network, trt_logger)
+    config = builder.create_builder_config()
+    config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 1 << 33)
+    config.set_flag(trt.BuilderFlag.FP16)
+    config.set_flag(trt.BuilderFlag.PREFER_PRECISION_CONSTRAINTS)
+
+    with open(onnx_path, "rb") as f:
+        if not parser.parse(f.read()):
+            for i in range(parser.num_errors):
+                logger.error(parser.get_error(i))
+            raise ValueError(f"failed to parse {onnx_path}")
+
+    # IO stays FP32 — PyTorch wrapper feeds fp32 tensors
+    for i in range(network.num_inputs):
+        network.get_input(i).dtype = trt.DataType.FLOAT
+    for i in range(network.num_outputs):
+        network.get_output(i).dtype = trt.DataType.FLOAT
+
+    SKIP_TYPES = {trt.LayerType.CONSTANT, trt.LayerType.CAST, trt.LayerType.SHAPE,
+                  trt.LayerType.GATHER, trt.LayerType.SLICE, trt.LayerType.SHUFFLE,
+                  trt.LayerType.CONCATENATION, trt.LayerType.IDENTITY}
+    SENSITIVE_KEYWORDS = (
+        'Sin', 'Cos', 'Pow', 'Reciprocal', 'Exp', 'Log', 'Sqrt',
+        'Softmax', 'LayerNorm', 'Tanh', 'Sigmoid', 'GELU', 'Erf',
+        'gelu', 'sigmoid', 'tanh', 'norm',
+    )
+    FLOAT_LIKE = (trt.DataType.FLOAT, trt.DataType.HALF, trt.DataType.BF16)
+
+    fp32_count = 0
+    for i in range(network.num_layers):
+        layer = network.get_layer(i)
+        if layer.type in SKIP_TYPES:
+            continue
+        should_fp32 = any(kw in layer.name for kw in SENSITIVE_KEYWORDS)
+        if not should_fp32:
+            if layer.type in (trt.LayerType.SOFTMAX, trt.LayerType.NORMALIZATION):
+                should_fp32 = True
+        if not should_fp32:
+            continue
+        try:
+            for j in range(layer.num_outputs):
+                if layer.get_output(j).dtype not in FLOAT_LIKE:
+                    should_fp32 = False
+                    break
+        except Exception:
+            pass
+        if should_fp32:
+            try:
+                layer.precision = trt.DataType.FLOAT
+                for j in range(layer.num_outputs):
+                    layer.set_output_type(j, trt.DataType.FLOAT)
+                fp32_count += 1
+            except Exception:
+                pass
+
+    logger.info(f"HiFT layer-mixed: marked {fp32_count}/{network.num_layers} layers as FP32")
+
+    profile = builder.create_optimization_profile()
+    profile.set_shape("x_pre",  (1, 512, 1),    (1, 512, 16),  (1, 512, 2500))
+    profile.set_shape("s_stft", (1, 18, 121),   (1, 18, 1921), (1, 18, 300001))
+    config.add_optimization_profile(profile)
+
+    engine_bytes = builder.build_serialized_network(network, config)
+    if engine_bytes is None:
+        raise RuntimeError("HiFT layer-mixed build returned None — check VRAM")
+    tmp = plan_path + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(bytes(engine_bytes))
+    os.replace(tmp, plan_path)
+    logger.info(f"Built {plan_path} ({os.path.getsize(plan_path)//(1024*1024)} MB)")
+
+
+def build_hift_plans(model_dir: str) -> None:
+    """Build HiFT layer-mixed + FP32 fallback plans (idempotent)."""
     layer_mixed_path = os.path.join(model_dir, 'hift_decode_core.layer_mixed_fp32io.plan')
     fp32_path = os.path.join(model_dir, 'hift_decode_core.fp32.plan')
     onnx_path = os.path.join(model_dir, 'hift_decode_core.onnx')
@@ -148,30 +263,15 @@ def build_hift_plans(model_dir: str) -> None:
         raise FileNotFoundError(f"HiFT ONNX missing: {onnx_path} "
                                 "(run export_hift_trt.py first)")
 
-    # Import builders from vocoder model.py
-    sys.path.insert(0, '/model_repo/vocoder/1')
-    try:
-        from model import _build_hift_layer_mixed_trt, _build_hift_fp32_trt
-    finally:
-        sys.path.pop(0)
-
     if os.path.exists(layer_mixed_path) and os.path.getsize(layer_mixed_path) > 0:
-        logger.info(f"HiFT layer-mixed plan exists, skipping: {os.path.basename(layer_mixed_path)}")
+        logger.info(f"HiFT layer-mixed plan exists, skipping")
     else:
-        logger.info(f"Building HiFT layer-mixed plan ...")
-        tmp = layer_mixed_path + ".tmp"
-        _build_hift_layer_mixed_trt(tmp, onnx_path)
-        os.replace(tmp, layer_mixed_path)
-        logger.info(f"Built HiFT layer-mixed plan: {layer_mixed_path}")
+        _build_hift_layer_mixed_trt(layer_mixed_path, onnx_path)
 
     if os.path.exists(fp32_path) and os.path.getsize(fp32_path) > 0:
-        logger.info(f"HiFT FP32 plan exists, skipping: {os.path.basename(fp32_path)}")
+        logger.info(f"HiFT FP32 plan exists, skipping")
     else:
-        logger.info(f"Building HiFT FP32 fallback plan ...")
-        tmp = fp32_path + ".tmp"
-        _build_hift_fp32_trt(tmp, onnx_path)
-        os.replace(tmp, fp32_path)
-        logger.info(f"Built HiFT FP32 plan: {fp32_path}")
+        _build_hift_fp32_trt(fp32_path, onnx_path)
 
 
 def main():

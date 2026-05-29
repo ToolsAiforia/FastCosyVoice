@@ -54,10 +54,14 @@ else
     echo "[0/4] Skipped: TRT-LLM engine already exists."
 fi
 
-# Remove pre-built TRT plans so they rebuild for this GPU
+# Remove pre-built TRT plans so they rebuild for this GPU.
+# Includes HiFT plans — otherwise a corrupted hift_decode_core.*.plan from
+# a prior parallel-build race (pre-66a18ac) would persist on the volume
+# mount, slip past Step 0.6's "skip if exists" check, and load → NaN audio.
 rm -f "${MODEL_DIR}"/campplus.*.fp32.trt \
       "${MODEL_DIR}"/campplus.*.fp32.plan \
-      "${MODEL_DIR}"/flow.decoder.estimator.*.plan
+      "${MODEL_DIR}"/flow.decoder.estimator.*.plan \
+      "${MODEL_DIR}"/hift_decode_core.*.plan
 
 # --- Step 0.5: Export hift_decode_core.onnx if missing ---
 # HF model repo does NOT ship this ONNX (subgraph extracted from hift.pt).

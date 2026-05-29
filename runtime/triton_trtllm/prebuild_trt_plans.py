@@ -206,6 +206,10 @@ def _build_hift_layer_mixed_trt(plan_path: str, onnx_path: str) -> None:
         'Sin', 'Cos', 'Pow', 'Reciprocal', 'Exp', 'Log', 'Sqrt',
         'Softmax', 'LayerNorm', 'Tanh', 'Sigmoid', 'GELU', 'Erf',
         'gelu', 'sigmoid', 'tanh', 'norm',
+        # Whole Snake activation blocks — without these, TRT PWN fusion
+        # crosses precision boundary at Sin/Pow/Reciprocal and produces NaN.
+        # 218 → 507 layers FP32. MUST match vocoder/1/model.py keywords.
+        '/activations1', '/activations2', '/m_source',
     )
     FLOAT_LIKE = (trt.DataType.FLOAT, trt.DataType.HALF, trt.DataType.BF16)
 

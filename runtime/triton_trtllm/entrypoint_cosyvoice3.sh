@@ -78,6 +78,22 @@ fi
 mkdir -p /workspace/CosyVoice/runtime/triton_trtllm
 ln -sfn "${MODEL_DIR}" /workspace/CosyVoice/runtime/triton_trtllm/Fun-CosyVoice3-0.5B-2512
 
+# --- Step 0.6: Pre-build TRT plans (DiT + HiFT) single-process ---
+# Without this, multiple token2wav/vocoder instances (count=6+) race when
+# building plans on first start — partial writes corrupt the .plan file →
+# "Serialization assertion plan.header.size == blobSize failed" → load fails.
+# Idempotent: skips any plan that already exists. Takes ~3-5 min on first
+# start, ~0 s on subsequent starts.
+if [ ! -f "${MODEL_DIR}/flow.decoder.estimator.layer_mixed_fp16.0.plan" ] || \
+   [ ! -f "${MODEL_DIR}/hift_decode_core.layer_mixed_fp32io.plan" ] || \
+   [ ! -f "${MODEL_DIR}/hift_decode_core.fp32.plan" ]; then
+    echo "[0.6/4] Pre-building TRT plans (single-process, ~3-5 min)..."
+    python3 /workdir/scripts/prebuild_trt_plans.py --model-dir "${MODEL_DIR}"
+    echo "[0.6/4] Done."
+else
+    echo "[0.6/4] Skipped: all TRT plans already exist."
+fi
+
 # --- Step 1: Fill model_repo templates ---
 echo "[1/4] Filling model repository templates..."
 

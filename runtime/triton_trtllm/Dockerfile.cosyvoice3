@@ -17,6 +17,7 @@ COPY entrypoint_cosyvoice3.sh /workdir/entrypoint.sh
 COPY scripts/convert_checkpoint.py /workdir/scripts/convert_checkpoint.py
 COPY scripts/fill_template.py /workdir/scripts/fill_template.py
 COPY export_hift_trt.py /workdir/scripts/export_hift_trt.py
+COPY prebuild_trt_plans.py /workdir/scripts/prebuild_trt_plans.py
 RUN chmod +x /workdir/entrypoint.sh
 
 EXPOSE 8000 8001 8002

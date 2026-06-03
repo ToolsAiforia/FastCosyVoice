@@ -172,8 +172,8 @@ class TritonPythonModel:
             # Tier-A A3: 750 → 200. Voice-chat workload produces ~50-150 speech
             # tokens. 200 is well above typical, gives less LLM scheduler memory
             # allocation overhead. Defensive cap stays in place.
-            "max_tokens": 200,
-            "temperature": 0.8,
+            "max_tokens": 600,
+            "temperature": 0.6,
             "top_p": 0.95,
             "top_k": 50,
             "repetition_penalty": 1.1,
@@ -231,7 +231,7 @@ class TritonPythonModel:
             # tokens. 200 is well above typical, gives less LLM scheduler memory
             # allocation overhead. Defensive cap stays in place.
             "max_tokens": 200,
-            "temperature": 0.8,
+            "temperature": 0.6,
             "top_p": 0.95,
             "top_k": 50,
             "repetition_penalty": 1.1,
@@ -359,7 +359,8 @@ class TritonPythonModel:
         reference_text = pb_utils.get_input_tensor_by_name(request, "reference_text")
         reference_text = reference_text.as_numpy()[0][0].decode('utf-8') if reference_text is not None else ""
         if '<|endofprompt|>' not in reference_text:
-            reference_text = 'You are a helpful assistant.<|endofprompt|>' + reference_text
+            reference_text = ('You are a helpful assistant. Speak calmly and evenly with a steady volume.'
+                              '<|endofprompt|>') + reference_text
 
         # Check speaker cache
         if reference_text in self.speaker_cache:
@@ -488,6 +489,15 @@ class TritonPythonModel:
                     speech_offset += new_speech.shape[1]
 
                     if new_speech.shape[1] > 0:
+                        # First-chunk Hann fade-in (15 ms = 360 samples @ 24 kHz)
+                        # to remove abrupt onset click. Later chunks unaffected.
+                        if chunk_index == 0:
+                            fade_len = min(360, new_speech.shape[1])
+                            fade = torch.hann_window(
+                                fade_len * 2, dtype=new_speech.dtype,
+                                device=new_speech.device)[:fade_len]
+                            new_speech = new_speech.clone()
+                            new_speech[:, :fade_len] = new_speech[:, :fade_len] * fade
                         audio_tensor = pb_utils.Tensor.from_dlpack(
                             "waveform", to_dlpack(new_speech))
                         inference_response = pb_utils.InferenceResponse(

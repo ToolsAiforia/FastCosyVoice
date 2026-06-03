@@ -1,0 +1,106 @@
+{
+  "angry_1": {
+    "original_sr": 44100,
+    "duration_sec": 14.17,
+    "peak": 0.942,
+    "rms": 0.088,
+    "transcript": "Get off my lawn, you kids simmer down. Knock it off. Stop doing that. You're annoying me. You're annoying me. And get out of my yard. Get out of my yard, kids. Eat your soup.",
+    "pipeline_input_file": "angry_1_16k.wav"
+  },
+  "angry_2": {
+    "original_sr": 44100,
+    "duration_sec": 14.46,
+    "peak": 0.951,
+    "rms": 0.086,
+    "transcript": "I have asked you repeatedly to get me the answer to my question. This is unacceptable behavior. I need to be escalated to a manager immediately. This is unacceptable, inappropriate, and I need answers right now. Actually, I needed answers yesterday.",
+    "pipeline_input_file": "angry_2_16k.wav"
+  },
+  "emily_orig": {
+    "original_sr": 48000,
+    "duration_sec": 24.73,
+    "peak": 0.945,
+    "rms": 0.13,
+    "transcript": "So my favorite podcast at the moment is a podcast called Ruined where it's two best friends. One loves horror movies, the other one hates horror movies. And so the friend who loves horror movies will watch one and then she'll tell basically the whole plot and all the spoilers to her friend who hates the horror movies because the friend who hates horror movies still wants all of the gossip and all of the tea. It's an awesome podcast.",
+    "pipeline_input_file": "emily_orig_16k.wav"
+  },
+  "exclamations_friendly": {
+    "original_sr": 48000,
+    "duration_sec": 7.72,
+    "peak": 0.94,
+    "rms": 0.121,
+    "transcript": "Excellent job on this, truly well executed. Now that's how it should be done. Fantastic work, really well done team.",
+    "pipeline_input_file": "exclamations_friendly_16k.wav"
+  },
+  "firm_a_little_mean": {
+    "original_sr": 48000,
+    "duration_sec": 14.08,
+    "peak": 0.954,
+    "rms": 0.117,
+    "transcript": "Let me be crystal clear, this needs to get done and it needs to get done right. We are not leaving room for delays or excuses. If there is an issue, surface it immediately so we can fix it and move forward. Accountability starts now.",
+    "pipeline_input_file": "firm_a_little_mean_16k.wav"
+  },
+  "firm_neutral": {
+    "original_sr": 48000,
+    "duration_sec": 13.74,
+    "peak": 0.832,
+    "rms": 0.098,
+    "transcript": "So this shouldn't have happened. We've talked about expectations, and unfortunately this falls short. I need you to take ownership, fix the issue, and I need you to make sure it doesn't happen again. Moving forward, I expect better attention to detail, no more repeat mistakes.",
+    "pipeline_input_file": "firm_neutral_16k.wav"
+  },
+  "firm_very_mean": {
+    "original_sr": 48000,
+    "duration_sec": 13.1,
+    "peak": 0.932,
+    "rms": 0.109,
+    "transcript": "This shouldn't have happened. We've talked about expectations and this falls short. I need you to take ownership, fix the issue and make sure it does not happen again. Moving forward, I expect better attention to detail, no more repeat mistakes.",
+    "pipeline_input_file": "firm_very_mean_16k.wav"
+  },
+  "friendly_2": {
+    "original_sr": 48000,
+    "duration_sec": 14.06,
+    "peak": 0.963,
+    "rms": 0.119,
+    "transcript": "Hey there, thanks so much for taking the time to connect today. I just wanna make sure that we're all on the same page about those next steps. Let's sort this out quickly together. And if anything is unclear, do not hesitate to ask. I am more than happy to help.",
+    "pipeline_input_file": "friendly_2_16k.wav"
+  },
+  "friendly_too_fast": {
+    "original_sr": 48000,
+    "duration_sec": 11.96,
+    "peak": 0.976,
+    "rms": 0.127,
+    "transcript": "Hey there, thanks so much for taking the time to connect. I just wanna make sure that we're all on the same page about those next steps. So let's sort this out quickly together and if anything is unclear, don't hesitate to ask. I'm more than happy to help.",
+    "pipeline_input_file": "friendly_too_fast_16k.wav"
+  },
+  "neutral": {
+    "original_sr": 48000,
+    "duration_sec": 11.51,
+    "peak": 0.918,
+    "rms": 0.1,
+    "transcript": "Hello there, and thank you for meeting with me today. I'd like to confirm that we're aligned on next steps and those expectations. We'll work efficiently to resolve this, but please reach out if you need any clarification on those next steps.",
+    "pipeline_input_file": "neutral_16k.wav"
+  },
+  "neutral_2": {
+    "original_sr": 48000,
+    "duration_sec": 10.75,
+    "peak": 0.805,
+    "rms": 0.093,
+    "transcript": "Hello, thank you for meeting with me today. I'd like to confirm that we're aligned on next steps and the expectations. We'll work together efficiently to resolve this, but please reach out if you need any clarification.",
+    "pipeline_input_file": "neutral_2_16k.wav"
+  },
+  "question_neutral": {
+    "original_sr": 48000,
+    "duration_sec": 7.14,
+    "peak": 0.921,
+    "rms": 0.1,
+    "transcript": "It looks like everything wrapped up on schedule. How was your weekend? Looks like the results came through as planned, is that correct?",
+    "pipeline_input_file": "question_neutral_16k.wav"
+  },
+  "questions_friendly": {
+    "original_sr": 48000,
+    "duration_sec": 8.84,
+    "peak": 0.939,
+    "rms": 0.118,
+    "transcript": "Wow, great work on that. How did it feel to get it done? You really nailed it. Are you proud of how that turned out? That went perfectly. Don't you think?",
+    "pipeline_input_file": "questions_friendly_16k.wav"
+  }
+}

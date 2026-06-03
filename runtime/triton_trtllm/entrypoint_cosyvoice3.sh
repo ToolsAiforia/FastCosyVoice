@@ -98,6 +98,29 @@ else
     echo "[0.6/4] Skipped: all TRT plans already exist."
 fi
 
+# --- Step 0.7: Bake default speaker into spk2info.pt if missing ---
+# Uses default_speaker.wav + default_speaker.txt (baked into image at
+# Dockerfile COPY step). The reference_text MUST match the instruction prefix
+# that BLS uses in cosyvoice3/1/model.py, otherwise cache lookup fails and
+# zero-shot path runs on every request (slower, less smooth).
+DEFAULT_SPK_WAV="/workdir/default_speaker.wav"
+DEFAULT_SPK_TXT_FILE="/workdir/default_speaker.txt"
+INSTRUCTION_PREFIX="You are a helpful assistant. Speak calmly and evenly with a steady volume.<|endofprompt|>"
+SPK2INFO_PATH="${MODEL_DIR}/spk2info.pt"
+if [ ! -f "${SPK2INFO_PATH}" ] && [ -f "${DEFAULT_SPK_WAV}" ] && [ -f "${DEFAULT_SPK_TXT_FILE}" ]; then
+    echo "[0.7/4] Generating spk2info.pt with 'default' speaker (neutral_2)..."
+    DEFAULT_SPK_TXT="$(cat ${DEFAULT_SPK_TXT_FILE})"
+    python3 /workdir/scripts/generate_spk2info.py \
+        --model-dir "${MODEL_DIR}" \
+        --audio "${DEFAULT_SPK_WAV}" \
+        --reference-text "${INSTRUCTION_PREFIX}${DEFAULT_SPK_TXT}" \
+        --speaker-name default \
+        --output "${SPK2INFO_PATH}"
+    echo "[0.7/4] Done."
+else
+    echo "[0.7/4] Skipped: spk2info.pt already exists or default speaker missing."
+fi
+
 # --- Step 1: Fill model_repo templates ---
 echo "[1/4] Filling model repository templates..."
 

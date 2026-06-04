@@ -148,12 +148,26 @@ echo "[1/4] Done."
 # --- Step 2: Start TensorRT-LLM inference server ---
 echo "[2/4] Starting TensorRT-LLM server on port ${LLM_PORT}..."
 
+# --extra_llm_api_options is REQUIRED — without it the runtime yaml
+# (enable_block_reuse / cuda_graph_mode / enable_chunked_prefill) is ignored
+# and the server runs on trtllm-serve defaults. Path resolves to the file
+# baked into the image at /workdir/trtllm_runtime_options.yaml (Dockerfile COPY).
+LLM_API_OPTIONS="/workdir/trtllm_runtime_options.yaml"
+EXTRA_OPTS=""
+if [ -f "${LLM_API_OPTIONS}" ]; then
+    EXTRA_OPTS="--extra_llm_api_options ${LLM_API_OPTIONS}"
+    echo "  using extra LLM api options: ${LLM_API_OPTIONS}"
+else
+    echo "  WARNING: ${LLM_API_OPTIONS} missing — running on trtllm-serve defaults"
+fi
+
 CUDA_VISIBLE_DEVICES=0 mpirun -np 1 --allow-run-as-root --oversubscribe \
     trtllm-serve serve \
         --tokenizer "${LLM_TOKENIZER_DIR}" \
         "${TRT_ENGINES_DIR}" \
         --max_batch_size "${LLM_MAX_BATCH_SIZE}" \
         --kv_cache_free_gpu_memory_fraction "${LLM_KV_CACHE_FRACTION}" \
+        ${EXTRA_OPTS} \
         --port "${LLM_PORT}" &
 LLM_PID=$!
 

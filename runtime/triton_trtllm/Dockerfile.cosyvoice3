@@ -19,6 +19,10 @@ COPY scripts/fill_template.py /workdir/scripts/fill_template.py
 COPY export_hift_trt.py /workdir/scripts/export_hift_trt.py
 COPY prebuild_trt_plans.py /workdir/scripts/prebuild_trt_plans.py
 COPY generate_spk2info.py /workdir/scripts/generate_spk2info.py
+# Runtime LLM options (prefix cache + cuda graph + chunked prefill).
+# entrypoint passes this via --extra_llm_api_options; without it the
+# server ignores the yaml and runs on defaults.
+COPY trtllm_runtime_options.yaml /workdir/trtllm_runtime_options.yaml
 # Default speaker reference (neutral_2 — smooth, business tone).
 # Entrypoint auto-generates spk2info.pt from this on first start.
 COPY default_speaker_neutral_2.wav /workdir/default_speaker.wav

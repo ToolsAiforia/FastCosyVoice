@@ -1,0 +1,7 @@
+enable_block_reuse: true
+kv_cache_free_gpu_memory_fraction: 0.3
+
+# Phase-1 speed knobs (TRT-LLM 0.20.0 keys — verified in llm_args schema).
+# Kernel/scheduling only, zero math change → audio unaffected.
+cuda_graph_mode: true
+enable_chunked_prefill: true

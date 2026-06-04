@@ -243,6 +243,16 @@ class TritonPythonModel:
         # Replace hift.decode with our hybrid implementation
         self._monkey_patch_decode()
 
+        # NOTE: f0_predictor deliberately stays on CPU (upstream design).
+        # Tried moving it to GPU (fp32) to skip the per-call GPU→CPU copy of
+        # the full accumulated mel, but verify-gate FAILED: on real speech mel
+        # the final-audio max|Δ| was 0.75 (781% of rms), mean 0.025 — far above
+        # the 1e-2 byte-identical threshold. CPU vs GPU fp32 diverge ~20% in the
+        # f0 values through the 5-layer causal-conv + ELU + abs() stack, which
+        # cascades into audibly different source/audio. This is exactly the
+        # "f0_predictor precision is crucial for causal inference" upstream
+        # warning. Do NOT move f0 to GPU without re-validating audio quality.
+
         logger.info(f"CausalHiFTGenerator hybrid initialized "
                     f"(upsample_total={self.upsample_total}, n_fft={self.istft_n_fft})")
 

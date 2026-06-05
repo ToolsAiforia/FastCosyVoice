@@ -19,6 +19,7 @@ COPY scripts/fill_template.py /workdir/scripts/fill_template.py
 COPY export_hift_trt.py /workdir/scripts/export_hift_trt.py
 COPY prebuild_trt_plans.py /workdir/scripts/prebuild_trt_plans.py
 COPY generate_spk2info.py /workdir/scripts/generate_spk2info.py
+COPY warmup.py /workdir/scripts/warmup.py
 # Runtime LLM options (prefix cache + cuda graph + chunked prefill).
 # entrypoint passes this via --extra_llm_api_options; without it the
 # server ignores the yaml and runs on defaults.

@@ -215,6 +215,20 @@ echo "  gRPC: localhost:${TRITON_GRPC_PORT}"
 echo "  HTTP: localhost:${TRITON_HTTP_PORT}"
 echo "============================================"
 
+# --- Step 4: Warm-up burst (all BLS instances + CUDA graph batch sizes) ---
+# Triton model_warmup primes DiT/HiFT per instance, but the BLS LLM warm-up is
+# lock-file gated (only one BLS instance warms trtllm-serve). This burst hits
+# every instance via round-robin + captures CUDA graphs for batch sizes 1..N,
+# so the first real user request is already hot. Non-fatal: never blocks serving.
+echo "[4/4] Warm-up burst..."
+WARMUP_CONC="${WARMUP_CONCURRENCY:-${BLS_INSTANCE_NUM}}"
+python3 /workdir/scripts/warmup.py \
+    --grpc "localhost:${TRITON_GRPC_PORT}" \
+    --http "localhost:${TRITON_HTTP_PORT}" \
+    --concurrency "${WARMUP_CONC}" \
+    --waves "${WARMUP_WAVES:-3}" || echo "  warm-up burst failed (non-fatal, continuing)"
+echo "[4/4] Done — pipeline hot."
+
 # Keep container alive - wait for either process to exit
 wait -n $LLM_PID $TRITON_PID
 echo "A server process exited unexpectedly. Shutting down..."

@@ -134,7 +134,7 @@ class TritonPythonModel:
                             {"role": "assistant", "content": spk_tokens},
                         ],
                         "max_tokens": max_tok,
-                        "temperature": 0.8,
+                        "temperature": 0.7,
                         "stream": False,
                     }
                     resp = _httpx_sync.post(self.api_base, json=payload, timeout=60.0)
@@ -173,7 +173,7 @@ class TritonPythonModel:
             # tokens. 200 is well above typical, gives less LLM scheduler memory
             # allocation overhead. Defensive cap stays in place.
             "max_tokens": 600,
-            "temperature": 0.6,
+            "temperature": 0.7,
             "top_p": 0.95,
             "top_k": 50,
             "repetition_penalty": 1.1,
@@ -231,7 +231,7 @@ class TritonPythonModel:
             # tokens. 200 is well above typical, gives less LLM scheduler memory
             # allocation overhead. Defensive cap stays in place.
             "max_tokens": 200,
-            "temperature": 0.6,
+            "temperature": 0.7,
             "top_p": 0.95,
             "top_k": 50,
             "repetition_penalty": 1.1,
@@ -359,7 +359,7 @@ class TritonPythonModel:
         reference_text = pb_utils.get_input_tensor_by_name(request, "reference_text")
         reference_text = reference_text.as_numpy()[0][0].decode('utf-8') if reference_text is not None else ""
         if '<|endofprompt|>' not in reference_text:
-            reference_text = ('You are a helpful assistant. Speak calmly and evenly with a steady volume.'
+            reference_text = ('You are a helpful assistant.'
                               '<|endofprompt|>') + reference_text
 
         # Check speaker cache
@@ -414,6 +414,37 @@ class TritonPythonModel:
 
         return prompt_speech_tokens_for_llm, prompt_speech_tokens, prompt_speech_feat, prompt_spk_embedding, reference_text
 
+    def _trim_leading_silence(self, wav, thr=0.02, win=240, preroll=120, fade_len=360):
+        """Drop the LLM's leading pause/breath from the FIRST emitted chunk.
+
+        The CosyVoice3 LLM emits silence speech-tokens before the content, so
+        generated audio starts with 0.3-1.5 s of near-silence. We detect the
+        onset on 10 ms RMS windows, cut everything before it (minus a short
+        pre-roll), and Hann fade-in the new onset (also kills the chunk-0 click).
+        Deterministic, reference-agnostic, and lowers TTFA. Returns the trimmed
+        [1, T] waveform, or None if the whole chunk is still below threshold.
+        """
+        x = wav[0]
+        T = int(x.shape[0])
+        if T == 0:
+            return None
+        n = T // win
+        if n > 0:
+            wv = x[:n * win].reshape(n, win)
+            rms = torch.sqrt((wv * wv).mean(dim=1) + 1e-9)
+            nz = torch.nonzero(rms > thr)
+            if nz.numel() == 0:
+                return None  # all silence — wait for the next chunk
+            start = max(0, int(nz[0].item()) * win - preroll)
+        else:
+            start = 0
+        out = wav[:, start:].clone()
+        fl = min(fade_len, int(out.shape[1]))
+        if fl > 0:
+            fade = torch.hann_window(fl * 2, dtype=out.dtype, device=out.device)[:fl]
+            out[:, :fl] = out[:, :fl] * fade
+        return out
+
     async def _process_request_streaming(self, request):
         """Process a single request in streaming (decoupled) mode."""
         request_id = request.request_id()
@@ -431,6 +462,7 @@ class TritonPythonModel:
             chunk_index = 0
             this_token_hop_len = self.token_hop_len
             speech_offset = 0
+            speech_started = False  # flips once leading silence is trimmed away
             start_time = time.time()
 
             # Tier-3 H2: pre-allocated mel buffer. Avoid O(N²) torch.cat at every
@@ -489,20 +521,18 @@ class TritonPythonModel:
                     speech_offset += new_speech.shape[1]
 
                     if new_speech.shape[1] > 0:
-                        # First-chunk Hann fade-in (15 ms = 360 samples @ 24 kHz)
-                        # to remove abrupt onset click. Later chunks unaffected.
-                        if chunk_index == 0:
-                            fade_len = min(360, new_speech.shape[1])
-                            fade = torch.hann_window(
-                                fade_len * 2, dtype=new_speech.dtype,
-                                device=new_speech.device)[:fade_len]
-                            new_speech = new_speech.clone()
-                            new_speech[:, :fade_len] = new_speech[:, :fade_len] * fade
-                        audio_tensor = pb_utils.Tensor.from_dlpack(
-                            "waveform", to_dlpack(new_speech))
-                        inference_response = pb_utils.InferenceResponse(
-                            output_tensors=[audio_tensor])
-                        response_sender.send(inference_response)
+                        if not speech_started:
+                            # Trim the LLM's leading silence before the first
+                            # emitted audio (also Hann fades the new onset).
+                            new_speech = self._trim_leading_silence(new_speech)
+                            if new_speech is not None and new_speech.shape[1] > 0:
+                                speech_started = True
+                        if new_speech is not None and new_speech.shape[1] > 0:
+                            audio_tensor = pb_utils.Tensor.from_dlpack(
+                                "waveform", to_dlpack(new_speech))
+                            inference_response = pb_utils.InferenceResponse(
+                                output_tensors=[audio_tensor])
+                            response_sender.send(inference_response)
 
                     token_offset += this_token_hop_len
 
@@ -556,7 +586,13 @@ class TritonPythonModel:
                     accumulated_mel[:, :, :mel_len].contiguous(), finalize=True)
 
                 new_speech = speech[:, speech_offset:]
-                if new_speech.shape[1] > 0:
+                if not speech_started and new_speech.shape[1] > 0:
+                    # Short utterance: all audio arrived in the final chunk —
+                    # trim its leading silence too.
+                    new_speech = self._trim_leading_silence(new_speech)
+                    if new_speech is not None and new_speech.shape[1] > 0:
+                        speech_started = True
+                if new_speech is not None and new_speech.shape[1] > 0:
                     audio_tensor = pb_utils.Tensor.from_dlpack(
                         "waveform", to_dlpack(new_speech))
                     inference_response = pb_utils.InferenceResponse(
@@ -602,6 +638,11 @@ class TritonPythonModel:
 
         # vocoder -> full speech
         speech = await self.forward_vocoder(mel, finalize=True)
+
+        # Trim the LLM's leading silence (deterministic, reference-agnostic).
+        trimmed = self._trim_leading_silence(speech)
+        if trimmed is not None and trimmed.shape[1] > 0:
+            speech = trimmed
 
         audio_tensor = pb_utils.Tensor.from_dlpack("waveform", to_dlpack(speech))
         return pb_utils.InferenceResponse(output_tensors=[audio_tensor])

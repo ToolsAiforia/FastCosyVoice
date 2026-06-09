@@ -20,6 +20,18 @@ TRITON_GRPC_PORT="${TRITON_GRPC_PORT:-8001}"
 TRITON_METRICS_PORT="${TRITON_METRICS_PORT:-8002}"
 LLM_PORT="${LLM_PORT:-8010}"
 
+# --- Thread-pool caps (CRITICAL for pids cgroup limit) ---
+# Each Triton python_backend stub otherwise spawns ~64 OpenBLAS threads; with
+# BLS_INSTANCE_NUM at 10-16 the stack overruns the container's pids cgroup cap
+# and tritonserver dies on pthread_create ("OpenBLAS blas_thread_init failed" ->
+# SIGSEGV). Capping these drops a stub from ~132 to ~8 threads. Inherited by
+# tritonserver and all backend stubs. Override per-var if the host has headroom.
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-2}"
+export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-2}"
+export MKL_NUM_THREADS="${MKL_NUM_THREADS:-2}"
+export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-2}"
+export VECLIB_MAXIMUM_THREADS="${VECLIB_MAXIMUM_THREADS:-2}"
+
 echo "============================================"
 echo "  CosyVoice3 TTS Server"
 echo "============================================"

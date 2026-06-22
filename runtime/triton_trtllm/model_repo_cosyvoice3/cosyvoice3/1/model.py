@@ -58,14 +58,22 @@ class TritonPythonModel:
         # round-9 SYNC inherited these settings from working tree but they
         # weren't committed to 3a4eb64; restoring here.
         self.token_frame_rate = 25
-        self.flow_pre_lookahead_len = 1   # was 3; round-5 step 10 — TTFA −15-25 ms
-        self.token_hop_len = 8            # was 15; round-5 step 9 — TTFA −150 ms
         self.token_mel_ratio = 2
-        self.dynamic_chunk_strategy = model_params.get("dynamic_chunk_strategy", "exponential")
+        # --- Re-optimization ladder knobs (config-driven; round-9 values are the
+        # defaults so existing deploys are unchanged). The quality-gated ladder flips
+        # these per step via config.pbtxt `parameters` to attribute each delta. ---
+        self.flow_pre_lookahead_len = int(model_params.get("flow_pre_lookahead_len", 1))  # round-9=1, vanilla=3
+        self.token_hop_len = int(model_params.get("token_hop_len", 8))                    # round-9=8, vanilla=15
+        self.dynamic_chunk_strategy = model_params.get("dynamic_chunk_strategy", "exponential")  # vanilla="fixed"
+        self.enable_trim = model_params.get("enable_trim", "1") == "1"                    # round-9=on
+        self.prompt_feat_fp16 = model_params.get("prompt_feat_fp16", "1") == "1"          # round-9=fp16
+        self.llm_seed = model_params.get("llm_seed", "")                                  # "" = no seed
         self.logger.log_info(f"CosyVoice3 BLS initialized, decoupled={self.decoupled}, "
                              f"chunk_strategy={self.dynamic_chunk_strategy}, "
                              f"token_hop_len={self.token_hop_len}, "
-                             f"flow_pre_lookahead_len={self.flow_pre_lookahead_len}")
+                             f"flow_pre_lookahead_len={self.flow_pre_lookahead_len}, "
+                             f"enable_trim={self.enable_trim}, prompt_feat_fp16={self.prompt_feat_fp16}, "
+                             f"llm_seed={self.llm_seed or 'none'}")
 
         # HTTP client for remote LLM (trtllm-serve default port: 8000)
         self.http_client = httpx.AsyncClient()
@@ -180,6 +188,8 @@ class TritonPythonModel:
             "stop": ["<|eos1|>", "<|eos|>"],
             "stream": True,
         }
+        if self.llm_seed:
+            payload["seed"] = int(self.llm_seed)
 
         buffer = ""
         async with self.http_client.stream("POST", self.api_base, json=payload, timeout=None) as response:
@@ -238,6 +248,8 @@ class TritonPythonModel:
             "stop": ["<|eos1|>", "<|eos|>"],
             "stream": False,
         }
+        if self.llm_seed:
+            payload["seed"] = int(self.llm_seed)
         response = await self.http_client.post(self.api_base, json=payload, timeout=None)
         response.raise_for_status()
         response_json = response.json()
@@ -401,7 +413,9 @@ class TritonPythonModel:
 
         # Align prompt speech feat and tokens to 2:1 ratio (for flow model only)
         token_len = min(int(speech_feat.shape[1] / 2), prompt_speech_tokens.shape[-1])
-        prompt_speech_feat = speech_feat[:, :2 * token_len].contiguous().half()
+        prompt_speech_feat = speech_feat[:, :2 * token_len].contiguous()
+        if self.prompt_feat_fp16:
+            prompt_speech_feat = prompt_speech_feat.half()
         prompt_speech_tokens = prompt_speech_tokens[:, :token_len].contiguous()
 
         # Cache
@@ -423,7 +437,12 @@ class TritonPythonModel:
         pre-roll), and Hann fade-in the new onset (also kills the chunk-0 click).
         Deterministic, reference-agnostic, and lowers TTFA. Returns the trimmed
         [1, T] waveform, or None if the whole chunk is still below threshold.
+
+        Ladder knob: when enable_trim is False this is a passthrough (returns the
+        waveform unchanged) so the baseline emits the model's true leading silence.
         """
+        if not self.enable_trim:
+            return wav
         x = wav[0]
         T = int(x.shape[0])
         if T == 0:
@@ -472,11 +491,23 @@ class TritonPythonModel:
                 1, 80, MAX_MEL_FRAMES, dtype=torch.float32, device=self.device)
             mel_len = 0
 
-            async for generated_id in self.forward_llm_streaming(
-                target_text=target_text,
-                reference_text=reference_text,
-                prompt_speech_tokens=prompt_speech_tokens_for_llm,
-            ):
+            # Ladder A/B: replay a fixed gold token sequence if provided, else
+            # stream from the LLM. Replaying holds the LLM constant so audio deltas
+            # come only from Flow/HiFT/chunking changes under test.
+            replay = self._get_replay_tokens(request)
+            if replay is not None:
+                async def _token_source():
+                    for tid in replay:
+                        yield tid
+                token_source = _token_source()
+            else:
+                token_source = self.forward_llm_streaming(
+                    target_text=target_text,
+                    reference_text=reference_text,
+                    prompt_speech_tokens=prompt_speech_tokens_for_llm,
+                )
+
+            async for generated_id in token_source:
                 semantic_token_ids_arr.append(generated_id)
 
                 while True:
@@ -617,12 +648,19 @@ class TritonPythonModel:
         target_text = pb_utils.get_input_tensor_by_name(request, "target_text").as_numpy()
         target_text = target_text[0][0].decode('utf-8')
 
-        # Get all speech tokens at once (use full untruncated prompt tokens for LLM)
-        all_token_ids = await self.forward_llm_offline(
-            target_text=target_text,
-            reference_text=reference_text,
-            prompt_speech_tokens=prompt_speech_tokens_for_llm,
-        )
+        # Ladder A/B: if replay_tokens is provided, skip the LLM and render the
+        # fixed gold token sequence so audio deltas are attributable to Flow/HiFT/
+        # chunking only. Otherwise generate normally (and emit the tokens so the
+        # gold pass can be dumped).
+        replay = self._get_replay_tokens(request)
+        if replay is not None:
+            all_token_ids = replay
+        else:
+            all_token_ids = await self.forward_llm_offline(
+                target_text=target_text,
+                reference_text=reference_text,
+                prompt_speech_tokens=prompt_speech_tokens_for_llm,
+            )
 
         if len(all_token_ids) == 0:
             raise pb_utils.TritonModelException("LLM generated no speech tokens")
@@ -645,7 +683,20 @@ class TritonPythonModel:
             speech = trimmed
 
         audio_tensor = pb_utils.Tensor.from_dlpack("waveform", to_dlpack(speech))
-        return pb_utils.InferenceResponse(output_tensors=[audio_tensor])
+        # Also emit the speech tokens so the gold pass can dump them for replay A/B.
+        tokens_tensor = pb_utils.Tensor(
+            "speech_tokens", np.array([all_token_ids], dtype=np.int32))
+        return pb_utils.InferenceResponse(output_tensors=[audio_tensor, tokens_tensor])
+
+    def _get_replay_tokens(self, request):
+        """Return a python list of speech-token ids from the optional replay_tokens
+        input, or None if not provided. Used by the ladder A/B harness to hold the
+        LLM output constant while varying Flow/HiFT/chunking."""
+        t = pb_utils.get_input_tensor_by_name(request, "replay_tokens")
+        if t is None:
+            return None
+        arr = t.as_numpy().reshape(-1).astype(np.int64)
+        return arr.tolist() if arr.size > 0 else None
 
     async def execute(self, requests):
         if self.decoupled:

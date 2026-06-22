@@ -226,13 +226,18 @@ class TritonPythonModel:
         onnx_path = os.path.join(model_dir, 'hift_decode_core.onnx')
         assert os.path.exists(onnx_path), f"Missing {onnx_path}"
 
-        # Build layer-mixed if missing
-        if not os.path.exists(layer_mixed_path) or os.path.getsize(layer_mixed_path) == 0:
-            _build_hift_layer_mixed_trt(layer_mixed_path, onnx_path)
-        if not os.path.exists(fp32_path) or os.path.getsize(fp32_path) == 0:
-            _build_hift_fp32_trt(fp32_path, onnx_path)
-
-        plan_path = layer_mixed_path  # prefer layer-mixed
+        # --- Re-optimization ladder knob: hift_plan = "layer_mixed" (round-9) |
+        #     "fp32" (vanilla-equivalent baseline). ---
+        hift_plan = model_params.get("hift_plan", "layer_mixed")
+        if hift_plan == "fp32":
+            if not os.path.exists(fp32_path) or os.path.getsize(fp32_path) == 0:
+                _build_hift_fp32_trt(fp32_path, onnx_path)
+            plan_path = fp32_path
+        else:
+            if not os.path.exists(layer_mixed_path) or os.path.getsize(layer_mixed_path) == 0:
+                _build_hift_layer_mixed_trt(layer_mixed_path, onnx_path)
+            plan_path = layer_mixed_path
+        logger.info(f"HiFT decode_core plan: {os.path.basename(plan_path)} (hift_plan={hift_plan})")
         import tensorrt as trt
         with open(plan_path, "rb") as f:
             engine = trt.Runtime(trt.Logger(trt.Logger.WARNING)).deserialize_cuda_engine(f.read())

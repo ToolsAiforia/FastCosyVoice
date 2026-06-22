@@ -91,8 +91,13 @@ class TritonPythonModel:
                 'qwen_pretrain_path': os.path.join(model_dir, 'CosyVoice-BlankEN')
             })
         self.flow = configs['flow']
-        self.fp16 = True
-        self.flow.half()
+        # --- Re-optimization ladder knobs (config-driven; round-9 defaults). ---
+        #   flow_precision: "fp16" (round-9) | "fp32" (vanilla baseline)
+        #   flow_trt:       "1" (round-9, layer_mixed_fp16 plan) | "0" (pure PyTorch)
+        self.fp16 = model_params.get("flow_precision", "fp16") == "fp16"
+        self.flow_trt = model_params.get("flow_trt", "1") == "1"
+        if self.fp16:
+            self.flow.half()
         self.flow.load_state_dict(
             torch.load(os.path.join(model_dir, 'flow.pt'),
                         map_location='cpu', weights_only=True),
@@ -100,8 +105,12 @@ class TritonPythonModel:
         )
         self.flow.to(self.device).eval()
 
-        # TRT acceleration for flow decoder estimator
-        self.load_trt(model_dir)
+        # TRT acceleration for flow decoder estimator (round-9 layer-mixed plan).
+        # Disabled for the vanilla-equivalent baseline (pure PyTorch estimator).
+        if self.flow_trt:
+            self.load_trt(model_dir)
+        logger.info(f"Token2wav flow_precision={'fp16' if self.fp16 else 'fp32'}, "
+                    f"flow_trt={self.flow_trt}")
 
         self.token_mel_ratio = self.flow.token_mel_ratio
         logger.info(f"Token2wav (flow-only) initialized, token_mel_ratio={self.token_mel_ratio}")

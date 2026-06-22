@@ -29,13 +29,13 @@ input [
   },
   {
     name: "prompt_speech_feat"
-    data_type: TYPE_FP16
+    data_type: TYPE_FP32
     dims: [-1, 80]
     optional: true
   },
   {
     name: "prompt_spk_embedding"
-    data_type: TYPE_FP16
+    data_type: TYPE_FP32
     dims: [-1]
     optional: true
   },
@@ -89,11 +89,11 @@ model_warmup [
     }
     inputs {
       key: "prompt_speech_feat"
-      value: { data_type: TYPE_FP16, dims: [250, 80], zero_data: true }
+      value: { data_type: TYPE_FP32, dims: [250, 80], zero_data: true }
     }
     inputs {
       key: "prompt_spk_embedding"
-      value: { data_type: TYPE_FP16, dims: [192], zero_data: true }
+      value: { data_type: TYPE_FP32, dims: [192], zero_data: true }
     }
     inputs {
       key: "token_offset"

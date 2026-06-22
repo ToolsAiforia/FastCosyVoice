@@ -284,6 +284,12 @@ class TritonPythonModel:
                     prompt_spk_embedding.to_dlpack()).to(self.device)
                 if prompt_spk_embedding.dim() == 1:
                     prompt_spk_embedding = prompt_spk_embedding.unsqueeze(0)
+                # Inputs are transported as fp32; cast to the flow's dtype (fp16 or
+                # fp32 per the flow_precision knob) so the matmuls match. Robust to
+                # warmup samples and to either precision baseline.
+                _dt = torch.float16 if self.fp16 else torch.float32
+                prompt_speech_feat = prompt_speech_feat.to(_dt)
+                prompt_spk_embedding = prompt_spk_embedding.to(_dt)
             else:
                 raise ValueError("prompt_speech_tokens is required for CosyVoice3 token2wav")
 

@@ -84,9 +84,13 @@ class TritonPythonModel:
         self.default_speaker_key = None
         self.speaker_name_to_cache_key = {}
 
-        # Load pre-computed spk2info.pt if available
+        # Load pre-computed spk2info.pt if available. Ladder knob: load_spk2info=0
+        # skips it so every request recomputes prompt features from the reference,
+        # respecting the prompt_feat_fp16/precision knobs (the baked spk2info holds
+        # round-9 fp16 features which would otherwise contaminate the fp32 baseline).
+        self.load_spk2info = model_params.get("load_spk2info", "1") == "1"
         spk2info_path = os.path.join(model_params.get("model_dir", ""), "spk2info.pt")
-        if os.path.exists(spk2info_path):
+        if self.load_spk2info and os.path.exists(spk2info_path):
             self.logger.log_info(f"Loading spk2info from {spk2info_path}")
             spk2info = torch.load(spk2info_path, map_location="cpu")
             for spk_name, spk_data in spk2info.items():
@@ -291,14 +295,17 @@ class TritonPythonModel:
                                 request_id, token_offset=None, finalize=True,
                                 priority=100):
         """Async BLS call to token2wav (flow-only). Returns mel tensor."""
+        # token2wav transports prompt_speech_feat / prompt_spk_embedding as fp32
+        # (it casts to the flow dtype internally). Cached spk2info tensors may be
+        # fp16, so force fp32 here to match the input contract.
         target_tokens_pb = pb_utils.Tensor.from_dlpack(
             "target_speech_tokens", to_dlpack(target_speech_tokens))
         prompt_tokens_pb = pb_utils.Tensor.from_dlpack(
             "prompt_speech_tokens", to_dlpack(prompt_speech_tokens))
         prompt_feat_pb = pb_utils.Tensor.from_dlpack(
-            "prompt_speech_feat", to_dlpack(prompt_speech_feat))
+            "prompt_speech_feat", to_dlpack(prompt_speech_feat.float().contiguous()))
         prompt_emb_pb = pb_utils.Tensor.from_dlpack(
-            "prompt_spk_embedding", to_dlpack(prompt_spk_embedding))
+            "prompt_spk_embedding", to_dlpack(prompt_spk_embedding.float().contiguous()))
 
         inputs = [target_tokens_pb, prompt_tokens_pb, prompt_feat_pb, prompt_emb_pb]
 
@@ -415,7 +422,10 @@ class TritonPythonModel:
         token_len = min(int(speech_feat.shape[1] / 2), prompt_speech_tokens.shape[-1])
         prompt_speech_feat = speech_feat[:, :2 * token_len].contiguous()
         if self.prompt_feat_fp16:
-            prompt_speech_feat = prompt_speech_feat.half()
+            # Apply fp16 precision loss but keep fp32 transport dtype (token2wav
+            # input is TYPE_FP32 and casts to the flow dtype internally). This makes
+            # the prompt_feat_fp16 knob an isolatable precision step.
+            prompt_speech_feat = prompt_speech_feat.half().float()
         prompt_speech_tokens = prompt_speech_tokens[:, :token_len].contiguous()
 
         # Cache
@@ -629,6 +639,13 @@ class TritonPythonModel:
                     inference_response = pb_utils.InferenceResponse(
                         output_tensors=[audio_tensor])
                     response_sender.send(inference_response)
+
+            # Emit the full speech-token sequence as a final response so the gold
+            # pass can dump it for replay A/B. Decoupled clients that only request
+            # "waveform" filter this out; the dump client requests "speech_tokens".
+            tokens_tensor = pb_utils.Tensor(
+                "speech_tokens", np.array([semantic_token_ids_arr], dtype=np.int32))
+            response_sender.send(pb_utils.InferenceResponse(output_tensors=[tokens_tensor]))
 
             response_sender.send(flags=pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL)
         except Exception as e:

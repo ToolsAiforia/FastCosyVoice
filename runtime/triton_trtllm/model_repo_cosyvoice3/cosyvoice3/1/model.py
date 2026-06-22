@@ -640,12 +640,18 @@ class TritonPythonModel:
                         output_tensors=[audio_tensor])
                     response_sender.send(inference_response)
 
-            # Emit the full speech-token sequence as a final response so the gold
-            # pass can dump it for replay A/B. Decoupled clients that only request
-            # "waveform" filter this out; the dump client requests "speech_tokens".
-            tokens_tensor = pb_utils.Tensor(
-                "speech_tokens", np.array([semantic_token_ids_arr], dtype=np.int32))
-            response_sender.send(pb_utils.InferenceResponse(output_tensors=[tokens_tensor]))
+            # Emit the full speech-token sequence as a final response ONLY when the
+            # client explicitly requested "speech_tokens" (the gold-dump harness).
+            # Standard streaming clients request only "waveform" and must not receive
+            # this extra non-waveform response (they'd choke on a missing waveform).
+            try:
+                wants_tokens = "speech_tokens" in request.requested_output_names()
+            except Exception:
+                wants_tokens = False
+            if wants_tokens:
+                tokens_tensor = pb_utils.Tensor(
+                    "speech_tokens", np.array([semantic_token_ids_arr], dtype=np.int32))
+                response_sender.send(pb_utils.InferenceResponse(output_tensors=[tokens_tensor]))
 
             response_sender.send(flags=pb_utils.TRITONSERVER_RESPONSE_COMPLETE_FINAL)
         except Exception as e:

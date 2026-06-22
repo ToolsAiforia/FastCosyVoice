@@ -78,6 +78,61 @@ Caveat: this baseline compares vanilla-OFFLINE-torchLLM vs round-9-STREAMING-trt
 - Optional max-speed: + `flow_trt=1` → TTFA 283 ms at UTMOS 4.011 (−0.054, +clicks) — ship only if 283 ms is required.
 - Trim (enable_trim=1) is orthogonal — only removes leading silence; toggle for UX.
 
+## S12 TTFA vs concurrency (END-TO-END: LLM+flow+vocoder, BLS=16, ref neutral_2)
+
+| N | mean | p50 | p95 | max |
+|---|---|---|---|---|
+| 1 (uncontended) | ~900 | — | — | 1117 |
+| 4 | 4327 | 4697 | 6311 | 6417 |
+| 6 | 4236 | 4083 | 5197 | 5363 |
+| 8 | 6194 | 6204 | 7063 | 7176 |
+| 12 | 9314 | 9474 | 11124 | 11259 |
+
+**Caveat — this is the real end-to-end TTFA, NOT the 632 ms render-only replay figure.** Two costs the replay benchmark hid:
+1. hop=15 makes the first chunk wait for **18 LLM tokens** (round-9's hop=8 waits for 9) → higher LLM-side TTFA.
+2. fp16-PyTorch flow (no TRT) is GPU-bound and contends under concurrency; non-incremental token2wav reprocesses the accumulated mel.
+
+So S12 trades **concurrency-TTFA for quality**: excellent UTMOS but TTFA scales worse than round-9 under load. To recover concurrency-TTFA: (a) `flow_trt=1` (S13) — TRT flow renders ~2× faster, scales far better, at −0.054 UTMOS; and/or (b) smaller `token_hop_len` (lower LLM-wait) — but that re-introduces the chunking quality cost. The right production point is likely **flow_trt=1 + moderate hop (~10)** — fast render removes the need for tiny chunks.
+
+### Official streaming bench (client_grpc.py, seed_tts_cosy2 zero-shot, 64 samples, warmup-dropped)
+
+**S12 (fp16-PyTorch flow, no TRT, hop15):**
+| N | RTF | TTFA p50 | TTFA p95 | total p50 | **stutter (>1s gaps)** |
+|---|---|---|---|---|---|
+| 1 | 0.86 | 642ms | 1592ms | 3955ms | 0% |
+| 4 | 0.32 | 870ms | 1014ms | 4421ms | 1.4% |
+| 8 | 0.28 | 1910ms | 2212ms | 7915ms | **23%** |
+| 12 | 0.28 | 2694ms | 3290ms | 9113ms | **45%** |
+
+S12 is excellent at **N≤4** (TTFA <900ms, ~no stutter, RTF<1) but **collapses at N≥8** — stutter 23–45% (the GPU-bound fp16-PyTorch flow + non-incremental token2wav can't sustain realtime under load). So S12 = best quality, low-concurrency only. For N≥8 you need flow-TRT (faster render).
+
+**S13 (flow layer-mixed fp16 TRT, hop15 — same conservative chunking):**
+
+| N | RTF | TTFA p50 | TTFA p95 | total p50 | **stutter** |
+|---|---|---|---|---|---|
+| 1 | 0.36 | 320ms | 1422ms | 1269ms | 0% |
+| 4 | 0.14 | 491ms | 650ms | 2113ms | 0% |
+| 8 | 0.10 | 820ms | 1041ms | 3424ms | 0% |
+| 12 | 0.10 | 1125ms | 1288ms | 3685ms | **0%** |
+
+**S13 sustains N=12 at 0% stutter, TTFA 320–1125ms, RTF 0.10** — far better scaling than S12. The TRT flow is essential for concurrency.
+
+## FINAL PRODUCTION RECOMMENDATION
+
+**Ship S13-conservative** = `flow_precision=fp16, flow_trt=1, hift_plan=layer_mixed, prompt_feat_fp16=1, token_hop_len=15, flow_pre_lookahead_len=3, dynamic_chunk_strategy=fixed`.
+
+| | round-9 (current) | **S13-conservative (new)** | S12 (max quality) |
+|---|---|---|---|
+| UTMOS | 3.74 | **4.011** (+0.27) | 4.065 (+0.33) |
+| chunking | hop8 (aggressive) | hop15 (conservative) | hop15 |
+| flow | fp16 TRT | fp16 TRT | fp16 PyTorch |
+| TTFA p50 @N=8 | ~290ms* | 820ms | 1910ms |
+| stutter @N=12 | (not measured) | **0%** | 45% |
+
+**The key fix:** round-9 lost quality from its **aggressive chunking (hop8/lookahead1)**, NOT from TRT. Keep the TRT flow (for speed/concurrency) but revert to **conservative chunking (hop15/lookahead3)** → recover +0.27 UTMOS while keeping TRT-grade throughput (0% stutter to N=12). If TTFA must be <500ms at high N, S12-style won't do it; only TRT will, and hop15 keeps it fast enough (820ms @N=8). Use S12 (no TRT) only for offline/low-concurrency where max quality matters.
+
+\* round-9's lower TTFA came partly from hop8 (fewer tokens to wait) — but at a quality cost we now avoid. hop15 + TRT is the better balance.
+
 ## Harness status (validated)
 
 - Branch `reopt/quality-gated`: commits `19cc556` (config-driven knobs + replay) + `01ae61b` (fp32 transport fixes).

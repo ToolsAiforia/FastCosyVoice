@@ -247,6 +247,7 @@ WARMUP_CONC="${WARMUP_CONCURRENCY:-${BLS_INSTANCE_NUM}}"
 python3 /workdir/scripts/warmup.py \
     --grpc "localhost:${TRITON_GRPC_PORT}" \
     --http "localhost:${TRITON_HTTP_PORT}" \
+    --speaker "${WARMUP_SPEAKER:-emily}" \
     --concurrency "${WARMUP_CONC}" \
     --waves "${WARMUP_WAVES:-3}" || echo "  warm-up burst failed (non-fatal, continuing)"
 echo "[4/4] Done — pipeline hot."

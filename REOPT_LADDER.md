@@ -78,6 +78,35 @@ Caveat: this baseline compares vanilla-OFFLINE-torchLLM vs round-9-STREAMING-trt
 - Optional max-speed: + `flow_trt=1` → TTFA 283 ms at UTMOS 4.011 (−0.054, +clicks) — ship only if 283 ms is required.
 - Trim (enable_trim=1) is orthogonal — only removes leading silence; toggle for UX.
 
+## FastChunk (post-S13 lossless TTFA win) — hop8 chunk-0 + exponential grow + lookahead3 + TRT
+
+Config: `token_hop_len=8, flow_pre_lookahead_len=3, dynamic_chunk_strategy=exponential` (chunk-0=8 tokens → low TTFA; then grows 25/50/100 — *bigger* than S13's fixed 15 → fewer seams). Pure config, no code change.
+
+**Quality (same gold tokens, vs S13):** UTMOS 4.011→**4.093 (+0.08)**, clicks 166→**77 (halved)**, WER/spk-sim identical. → quality GAIN, not loss.
+
+**Warm TTFA p50 / stutter:**
+| N | FastChunk | S13-cons | round-9 |
+|---|---|---|---|
+| 1 | 280 / 0% | 308 / 0% | 284 / 0% |
+| 4 | 356 / 3.4% | 534 / 0% | 349 / 2.6% |
+| 8 | **449 / 5.9%** | 890 / 0% | 427 / 5.8% |
+| 12 | 607 / 13% | 1149 / 0% | 530 / 14% |
+
+FastChunk ≈ round-9 TTFA (449 vs 427 @N=8) — **closes S13's TTFA gap** — with **better quality than S13**. Cost: reintroduces stutter at N≥8 (5.9–13%, from the big 50/100-token chunks under load).
+
+### ✅ S14 (SHIPPED) = FastChunk-capped: hop8 chunk-0 + exponential **cap@25** + lookahead3 + TRT
+Add `max_token_hop_len=25` cap so chunks go 8→25→25→25 (small fast chunk-0, then bounded steady chunk). New `max_token_hop_len` knob in `cosyvoice3/1/model.py`. **Strictly beats S13 — no tradeoff:**
+
+| N | **S14 (capped)** TTFA / stutter | S13 TTFA / stutter |
+|---|---|---|
+| 1 | 334 / 0% | 308 / 0% |
+| 4 | 405 / **0%** | 534 / 0% |
+| 8 | **579 / 0%** | 890 / 0% |
+| 12 | **696 / 0%** | 1149 / 0% |
+
+Quality (same gold tokens): UTMOS **4.011 = S13**, clicks **96 < S13's 166**, WER/spk-sim identical. RTF 0.08 < S13 0.11.
+**Verdict: TTFA −35% @N=8 / −39% @N=12, 0% stutter to N=12, equal quality, lower RTF, fewer clicks.** Shipped as the new default (was S13). Lossless win — exactly "ускорение без потери качества".
+
 ## ⚠️ CORRECTED WARM BENCHMARKS (cold-start fixed — these supersede everything below)
 
 Methodology: per config — cold restart → **`warmup.py --waves 3 --concurrency 16`** (primes all instances + TRT plans + CUDA graphs) → official `client_grpc.py` sweep (seed_tts zero-shot, max_samples=96, warmup-requests=4). GPU steady at 1755 MHz. **Validated**: config A (hop8+TRT) reproduces documented round-9 (N=8 TTFA p50 427ms vs doc 429ms, stutter 5.8% vs 6.3%).

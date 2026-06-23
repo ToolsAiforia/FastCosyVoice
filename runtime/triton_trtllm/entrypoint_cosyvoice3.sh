@@ -110,15 +110,20 @@ else
     echo "[0.6/4] Skipped: all TRT plans already exist."
 fi
 
-# --- Step 0.7: Bake all baked speakers into spk2info.pt if missing ---
+# --- Step 0.7: Bake all baked speakers into spk2info.pt ---
 # Bakes /workdir/speakers/<name>.{wav,txt} (emily + spk01..spk17). emily is
 # baked FIRST so it becomes the default-fallback speaker (no speaker_name).
 # generate_spk2info auto-prepends the base instruction prefix
 # ("You are a helpful assistant.<|endofprompt|>") — matches the BLS cache key.
+#
+# If speakers/ dir exists with wavs, ALWAYS rebake — the upstream HF download
+# ships its own spk2info.pt with a single 'default' entry, which would otherwise
+# silence our 18-speaker fleet. Wipe + bake fresh.
 SPEAKERS_DIR="/workdir/speakers"
 SPK2INFO_PATH="${MODEL_DIR}/spk2info.pt"
-if [ ! -f "${SPK2INFO_PATH}" ] && [ -d "${SPEAKERS_DIR}" ]; then
+if [ -d "${SPEAKERS_DIR}" ] && ls "${SPEAKERS_DIR}"/*.wav >/dev/null 2>&1; then
     echo "[0.7/4] Baking speakers into spk2info.pt (emily + spk01..spk17)..."
+    rm -f "${SPK2INFO_PATH}"   # drop any pre-baked HF default
     # emily first (-> default), then the rest sorted
     SPK_ORDER="emily $(ls "${SPEAKERS_DIR}"/*.wav 2>/dev/null | xargs -n1 basename | sed 's/\.wav$//' | grep -v '^emily$' | sort)"
     for name in ${SPK_ORDER}; do
@@ -132,8 +137,10 @@ if [ ! -f "${SPK2INFO_PATH}" ] && [ -d "${SPEAKERS_DIR}" ]; then
             --output "${SPK2INFO_PATH}" >/dev/null 2>&1 && echo "  baked ${name}" || echo "  FAILED ${name}"
     done
     echo "[0.7/4] Done."
+elif [ -f "${SPK2INFO_PATH}" ]; then
+    echo "[0.7/4] No speakers/ dir — using existing spk2info.pt as-is."
 else
-    echo "[0.7/4] Skipped: spk2info.pt already exists or speakers/ missing."
+    echo "[0.7/4] WARN: no spk2info.pt and no speakers/ dir — multi-speaker API won't work."
 fi
 
 # --- Step 1: Fill model_repo templates ---

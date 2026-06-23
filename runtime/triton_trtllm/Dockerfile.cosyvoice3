@@ -24,10 +24,10 @@ COPY warmup.py /workdir/scripts/warmup.py
 # entrypoint passes this via --extra_llm_api_options; without it the
 # server ignores the yaml and runs on defaults.
 COPY trtllm_runtime_options.yaml /workdir/trtllm_runtime_options.yaml
-# Default speaker reference (neutral_2 — smooth, business tone).
-# Entrypoint auto-generates spk2info.pt from this on first start.
-COPY default_speaker_neutral_2.wav /workdir/default_speaker.wav
-COPY default_speaker_neutral_2.txt /workdir/default_speaker.txt
+# Baked speaker set: emily (default) + spk01..spk17 (US/Canada, artifact-free).
+# Each <name>.wav + <name>.txt; entrypoint bakes them all into spk2info.pt on
+# first start (emily first -> default fallback). See speakers/INDEX.md.
+COPY speakers/ /workdir/speakers/
 RUN chmod +x /workdir/entrypoint.sh
 
 EXPOSE 8000 8001 8002

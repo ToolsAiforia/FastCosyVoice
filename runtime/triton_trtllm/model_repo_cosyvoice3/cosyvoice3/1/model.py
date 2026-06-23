@@ -59,14 +59,17 @@ class TritonPythonModel:
         # weren't committed to 3a4eb64; restoring here.
         self.token_frame_rate = 25
         self.token_mel_ratio = 2
-        # --- Re-optimization ladder knobs (config-driven; round-9 values are the
-        # defaults so existing deploys are unchanged). The quality-gated ladder flips
-        # these per step via config.pbtxt `parameters` to attribute each delta. ---
-        self.flow_pre_lookahead_len = int(model_params.get("flow_pre_lookahead_len", 1))  # round-9=1, vanilla=3
-        self.token_hop_len = int(model_params.get("token_hop_len", 8))                    # round-9=8, vanilla=15
-        self.dynamic_chunk_strategy = model_params.get("dynamic_chunk_strategy", "exponential")  # vanilla="fixed"
-        self.enable_trim = model_params.get("enable_trim", "1") == "1"                    # round-9=on
-        self.prompt_feat_fp16 = model_params.get("prompt_feat_fp16", "1") == "1"          # round-9=fp16
+        # --- Streaming/quality knobs (config-driven; defaults = SHIPPED config). ---
+        # Shipped default is S13-conservative: conservative chunking (hop15/lookahead3/
+        # fixed) keeps near-offline quality (UTMOS 4.01 vs round-9 3.74, 0% stutter to
+        # N=12) since fp16 TRT flow renders the large chunk just as fast. Round-9's
+        # aggressive hop8/lookahead1/exponential was the main quality regression; it can
+        # still be selected via config.pbtxt parameters for lowest-TTFA-at-any-cost.
+        self.flow_pre_lookahead_len = int(model_params.get("flow_pre_lookahead_len", 3))  # S13=3, round-9=1
+        self.token_hop_len = int(model_params.get("token_hop_len", 15))                   # S13=15, round-9=8
+        self.dynamic_chunk_strategy = model_params.get("dynamic_chunk_strategy", "fixed")  # S13="fixed", round-9="exponential"
+        self.enable_trim = model_params.get("enable_trim", "0") == "1"                    # shipped off (model's natural lead)
+        self.prompt_feat_fp16 = model_params.get("prompt_feat_fp16", "1") == "1"          # fp16 (lossless)
         self.llm_seed = model_params.get("llm_seed", "")                                  # "" = no seed
         self.logger.log_info(f"CosyVoice3 BLS initialized, decoupled={self.decoupled}, "
                              f"chunk_strategy={self.dynamic_chunk_strategy}, "

@@ -110,27 +110,30 @@ else
     echo "[0.6/4] Skipped: all TRT plans already exist."
 fi
 
-# --- Step 0.7: Bake default speaker into spk2info.pt if missing ---
-# Uses default_speaker.wav + default_speaker.txt (baked into image at
-# Dockerfile COPY step). The reference_text MUST match the instruction prefix
-# that BLS uses in cosyvoice3/1/model.py, otherwise cache lookup fails and
-# zero-shot path runs on every request (slower, less smooth).
-DEFAULT_SPK_WAV="/workdir/default_speaker.wav"
-DEFAULT_SPK_TXT_FILE="/workdir/default_speaker.txt"
-INSTRUCTION_PREFIX="You are a helpful assistant. Speak calmly and evenly with a steady volume.<|endofprompt|>"
+# --- Step 0.7: Bake all baked speakers into spk2info.pt if missing ---
+# Bakes /workdir/speakers/<name>.{wav,txt} (emily + spk01..spk17). emily is
+# baked FIRST so it becomes the default-fallback speaker (no speaker_name).
+# generate_spk2info auto-prepends the base instruction prefix
+# ("You are a helpful assistant.<|endofprompt|>") — matches the BLS cache key.
+SPEAKERS_DIR="/workdir/speakers"
 SPK2INFO_PATH="${MODEL_DIR}/spk2info.pt"
-if [ ! -f "${SPK2INFO_PATH}" ] && [ -f "${DEFAULT_SPK_WAV}" ] && [ -f "${DEFAULT_SPK_TXT_FILE}" ]; then
-    echo "[0.7/4] Generating spk2info.pt with 'default' speaker (neutral_2)..."
-    DEFAULT_SPK_TXT="$(cat ${DEFAULT_SPK_TXT_FILE})"
-    python3 /workdir/scripts/generate_spk2info.py \
-        --model-dir "${MODEL_DIR}" \
-        --audio "${DEFAULT_SPK_WAV}" \
-        --reference-text "${INSTRUCTION_PREFIX}${DEFAULT_SPK_TXT}" \
-        --speaker-name default \
-        --output "${SPK2INFO_PATH}"
+if [ ! -f "${SPK2INFO_PATH}" ] && [ -d "${SPEAKERS_DIR}" ]; then
+    echo "[0.7/4] Baking speakers into spk2info.pt (emily + spk01..spk17)..."
+    # emily first (-> default), then the rest sorted
+    SPK_ORDER="emily $(ls "${SPEAKERS_DIR}"/*.wav 2>/dev/null | xargs -n1 basename | sed 's/\.wav$//' | grep -v '^emily$' | sort)"
+    for name in ${SPK_ORDER}; do
+        wav="${SPEAKERS_DIR}/${name}.wav"; txt="${SPEAKERS_DIR}/${name}.txt"
+        [ -f "$wav" ] && [ -f "$txt" ] || { echo "  skip ${name} (missing wav/txt)"; continue; }
+        python3 /workdir/scripts/generate_spk2info.py \
+            --model-dir "${MODEL_DIR}" \
+            --audio "${wav}" \
+            --reference-text "$(cat ${txt})" \
+            --speaker-name "${name}" \
+            --output "${SPK2INFO_PATH}" >/dev/null 2>&1 && echo "  baked ${name}" || echo "  FAILED ${name}"
+    done
     echo "[0.7/4] Done."
 else
-    echo "[0.7/4] Skipped: spk2info.pt already exists or default speaker missing."
+    echo "[0.7/4] Skipped: spk2info.pt already exists or speakers/ missing."
 fi
 
 # --- Step 1: Fill model_repo templates ---

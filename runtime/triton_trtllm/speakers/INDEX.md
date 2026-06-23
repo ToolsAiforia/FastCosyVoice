@@ -4,7 +4,7 @@ Default speaker: **emily** (conversational, reference_samples/emily_orig). Selec
 
 | name | gender/pitch | dataset | id | accent | f0 | UTMOS | SECS |
 |---|---|---|---|---|---|---|---|
-| **emily** | F (conversational) | custom | emily | us | — | — | — |
+| **emily** | F (neutral, business) | custom | neutral_2 | us | — | — | — |
 | spk01 | F_high | hifi-tts | 12787 | us | 233 | 4.39 | 0.982 |
 | spk02 | F_high | vctk | p310 | canada | 243 | 4.24 | 0.961 |
 | spk03 | F_high | vctk | p305 | canada | 237 | 4.19 | 0.976 |

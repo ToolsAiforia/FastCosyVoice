@@ -1,0 +1,228 @@
+Initializing gRPC client for streaming mode...
+Capped dataset to first 96 items via --max-samples.
+Initializing temporary async client for fetching stats...
+Fetching inference statistics before running tasks...
+task-0: Initializing sync client for streaming...
+task-0: Starting streaming processing for 8 items.
+task-0: Processing item 0/8
+task-1: Initializing sync client for streaming...
+task-1: Starting streaming processing for 8 items.
+task-1: Processing item 0/8
+task-2: Initializing sync client for streaming...
+task-2: Starting streaming processing for 8 items.
+task-2: Processing item 0/8
+task-3: Initializing sync client for streaming...
+task-3: Starting streaming processing for 8 items.
+task-3: Processing item 0/8
+task-4: Initializing sync client for streaming...
+task-4: Starting streaming processing for 8 items.
+task-4: Processing item 0/8
+task-5: Initializing sync client for streaming...
+task-5: Starting streaming processing for 8 items.
+task-5: Processing item 0/8
+task-6: Initializing sync client for streaming...
+task-6: Starting streaming processing for 8 items.
+task-6: Processing item 0/8
+task-7: Initializing sync client for streaming...
+task-7: Starting streaming processing for 8 items.
+task-7: Processing item 0/8
+task-8: Initializing sync client for streaming...
+task-8: Starting streaming processing for 8 items.
+task-8: Processing item 0/8
+task-9: Initializing sync client for streaming...
+task-9: Starting streaming processing for 8 items.
+task-9: Processing item 0/8
+task-10: Initializing sync client for streaming...
+task-10: Starting streaming processing for 8 items.
+task-10: Processing item 0/8
+task-11: Initializing sync client for streaming...
+task-11: Starting streaming processing for 8 items.
+task-11: Processing item 0/8
+task-7: Item 0 - First Chunk Latency: 2.1007s, Second Chunk Latency: 1.1948802471160889, Total Latency: 6.3008s, Duration: 2.4800s
+task-11: Item 0 - First Chunk Latency: 1.3979s, Second Chunk Latency: 1.4045531749725342, Total Latency: 6.9533s, Duration: 2.6800s
+task-0: Item 0 - First Chunk Latency: 0.7749s, Second Chunk Latency: 1.4442429542541504, Total Latency: 8.0777s, Duration: 3.2000s
+task-6: Item 0 - First Chunk Latency: 1.2429s, Second Chunk Latency: 1.0792193412780762, Total Latency: 8.1090s, Duration: 3.2400s
+task-1: Item 0 - First Chunk Latency: 1.3953s, Second Chunk Latency: 1.0886754989624023, Total Latency: 8.4237s, Duration: 3.2800s
+task-9: Item 0 - First Chunk Latency: 1.4748s, Second Chunk Latency: 1.5047993659973145, Total Latency: 9.8794s, Duration: 3.9600s
+task-2: Item 0 - First Chunk Latency: 1.2446s, Second Chunk Latency: 1.0636205673217773, Total Latency: 10.5785s, Duration: 4.8800s
+task-7: Item 1 - First Chunk Latency: 2.8664s, Second Chunk Latency: 1.2060234546661377, Total Latency: 5.3221s, Duration: 1.8400s
+task-5: Item 0 - First Chunk Latency: 1.4953s, Second Chunk Latency: 1.489781141281128, Total Latency: 12.4731s, Duration: 5.1200s
+task-4: Item 0 - First Chunk Latency: 1.4857s, Second Chunk Latency: 1.1087818145751953, Total Latency: 13.7374s, Duration: 5.6400s
+task-0: Item 1 - First Chunk Latency: 2.8588s, Second Chunk Latency: 1.2005946636199951, Total Latency: 8.5291s, Duration: 2.9600s
+task-8: Item 0 - First Chunk Latency: 1.9383s, Second Chunk Latency: 1.2296950817108154, Total Latency: 17.7038s, Duration: 6.7200s
+task-6: Item 1 - First Chunk Latency: 2.8485s, Second Chunk Latency: 1.1952354907989502, Total Latency: 9.6610s, Duration: 3.2800s
+task-5: Item 1 - First Chunk Latency: 3.1156s, Second Chunk Latency: 1.2080588340759277, Total Latency: 6.8928s, Duration: 2.2000s
+task-11: Item 1 - First Chunk Latency: 2.6898s, Second Chunk Latency: 1.2814867496490479, Total Latency: 12.6453s, Duration: 4.6400s
+task-1: Item 1 - First Chunk Latency: 2.9509s, Second Chunk Latency: 1.1777770519256592, Total Latency: 12.2716s, Duration: 4.4400s
+task-10: Item 0 - First Chunk Latency: 3.0560s, Second Chunk Latency: 1.2584586143493652, Total Latency: 21.9159s, Duration: 8.0000s
+task-9: Item 1 - First Chunk Latency: 3.0170s, Second Chunk Latency: 1.2333450317382812, Total Latency: 12.0834s, Duration: 4.7600s
+task-2: Item 1 - First Chunk Latency: 2.6942s, Second Chunk Latency: 1.2263879776000977, Total Latency: 12.4528s, Duration: 4.3600s
+task-8: Item 1 - First Chunk Latency: 2.8974s, Second Chunk Latency: 1.1819038391113281, Total Latency: 9.4374s, Duration: 3.3200s
+task-6: Item 2 - First Chunk Latency: 2.9059s, Second Chunk Latency: 1.1467523574829102, Total Latency: 9.8142s, Duration: 3.1600s
+task-11: Item 2 - First Chunk Latency: 2.9485s, Second Chunk Latency: 1.2375524044036865, Total Latency: 13.3883s, Duration: 4.6400s
+task-4: Item 1 - First Chunk Latency: 3.4329s, Second Chunk Latency: 1.3926444053649902, Total Latency: 20.2769s, Duration: 7.1600s
+task-10: Item 1 - First Chunk Latency: 2.9938s, Second Chunk Latency: 1.4858770370483398, Total Latency: 13.5942s, Duration: 4.3600s
+task-9: Item 2 - First Chunk Latency: 3.0544s, Second Chunk Latency: 1.6543018817901611, Total Latency: 13.7570s, Duration: 4.3200s
+task-1: Item 2 - First Chunk Latency: 2.8525s, Second Chunk Latency: 1.3034029006958008, Total Latency: 17.2890s, Duration: 5.8800s
+task-6: Item 3 - First Chunk Latency: 2.7922s, Second Chunk Latency: 1.700531244277954, Total Latency: 10.4607s, Duration: 3.5600s
+task-2: Item 2 - First Chunk Latency: 3.0120s, Second Chunk Latency: 1.528909683227539, Total Latency: 17.0238s, Duration: 5.8400s
+task-8: Item 2 - First Chunk Latency: 3.0888s, Second Chunk Latency: 1.3334782123565674, Total Latency: 13.0263s, Duration: 4.4000s
+task-0: Item 2 - First Chunk Latency: 3.1049s, Second Chunk Latency: 1.1625471115112305, Total Latency: 23.9292s, Duration: 8.3600s
+task-5: Item 2 - First Chunk Latency: 2.6827s, Second Chunk Latency: 1.3867957592010498, Total Latency: 21.7968s, Duration: 7.6400s
+task-11: Item 3 - First Chunk Latency: 2.8824s, Second Chunk Latency: 1.4271337985992432, Total Latency: 9.1559s, Duration: 3.2800s
+task-4: Item 2 - First Chunk Latency: 2.8302s, Second Chunk Latency: 1.5015807151794434, Total Latency: 13.0237s, Duration: 4.6400s
+task-6: Item 4 - First Chunk Latency: 2.9810s, Second Chunk Latency: 1.0789778232574463, Total Latency: 10.2638s, Duration: 3.4000s
+task-6: Processing item 5/8
+task-9: Item 3 - First Chunk Latency: 3.2219s, Second Chunk Latency: 1.1686534881591797, Total Latency: 13.1576s, Duration: 4.8800s
+task-0: Item 3 - First Chunk Latency: 2.9476s, Second Chunk Latency: 1.4298219680786133, Total Latency: 9.3121s, Duration: 3.0000s
+task-2: Item 3 - First Chunk Latency: 2.9770s, Second Chunk Latency: 1.3200156688690186, Total Latency: 11.9331s, Duration: 4.2400s
+task-9: Item 4 - First Chunk Latency: 2.7161s, Second Chunk Latency: 1.6485061645507812, Total Latency: 5.8931s, Duration: 1.3600s
+task-9: Processing item 5/8
+task-11: Item 4 - First Chunk Latency: 3.3844s, Second Chunk Latency: 1.8716790676116943, Total Latency: 12.9400s, Duration: 4.0800s
+task-11: Processing item 5/8
+task-5: Item 3 - First Chunk Latency: 3.1390s, Second Chunk Latency: 1.4216854572296143, Total Latency: 16.6179s, Duration: 5.6000s
+task-2: Item 4 - First Chunk Latency: 3.2284s, Second Chunk Latency: 1.4595229625701904, Total Latency: 8.9091s, Duration: 2.5200s
+task-2: Processing item 5/8
+task-1: Item 3 - First Chunk Latency: 2.9253s, Second Chunk Latency: 0.9367995262145996, Total Latency: 22.9337s, Duration: 8.3200s
+task-4: Item 3 - First Chunk Latency: 3.1539s, Second Chunk Latency: 1.1950650215148926, Total Latency: 14.7678s, Duration: 5.1200s
+task-6: Item 5 - First Chunk Latency: 3.1483s, Second Chunk Latency: 1.4651331901550293, Total Latency: 16.3504s, Duration: 5.0000s
+task-11: Item 5 - First Chunk Latency: 3.4351s, Second Chunk Latency: 1.5099575519561768, Total Latency: 9.4559s, Duration: 3.0800s
+task-8: Item 3 - First Chunk Latency: 2.8793s, Second Chunk Latency: 1.672964096069336, Total Latency: 28.1751s, Duration: 9.2800s
+task-0: Item 4 - First Chunk Latency: 3.5023s, Second Chunk Latency: 1.3534784317016602, Total Latency: 19.0597s, Duration: 6.0800s
+task-0: Processing item 5/8
+task-10: Item 2 - First Chunk Latency: 3.1514s, Second Chunk Latency: 1.2029483318328857, Total Latency: 34.3183s, Duration: 11.6800s
+task-9: Item 5 - First Chunk Latency: 3.3489s, Second Chunk Latency: 1.2370209693908691, Total Latency: 15.4861s, Duration: 4.9600s
+task-4: Item 4 - First Chunk Latency: 2.9616s, Second Chunk Latency: 1.1522915363311768, Total Latency: 10.0212s, Duration: 3.6400s
+task-4: Processing item 5/8
+task-2: Item 5 - First Chunk Latency: 2.7959s, Second Chunk Latency: 1.1968028545379639, Total Latency: 11.8932s, Duration: 4.6800s
+task-5: Item 4 - First Chunk Latency: 3.2081s, Second Chunk Latency: 1.2157013416290283, Total Latency: 15.9471s, Duration: 5.9200s
+task-5: Processing item 5/8
+task-11: Item 6 - First Chunk Latency: 3.2824s, Second Chunk Latency: 1.4890780448913574, Total Latency: 9.9152s, Duration: 3.2800s
+task-1: Item 4 - First Chunk Latency: 3.5218s, Second Chunk Latency: 1.3474476337432861, Total Latency: 14.7248s, Duration: 5.2400s
+task-1: Processing item 5/8
+task-3: Item 0 - First Chunk Latency: 1.4125s, Second Chunk Latency: 1.0763869285583496, Total Latency: 77.1821s, Duration: 24.0000s
+task-8: Item 4 - First Chunk Latency: 3.0905s, Second Chunk Latency: 1.3373181819915771, Total Latency: 9.9687s, Duration: 3.1200s
+task-8: Processing item 5/8
+task-0: Item 5 - First Chunk Latency: 3.2625s, Second Chunk Latency: 1.4943320751190186, Total Latency: 10.6600s, Duration: 3.2400s
+task-9: Item 6 - First Chunk Latency: 3.2279s, Second Chunk Latency: 1.2359447479248047, Total Latency: 10.0252s, Duration: 3.5600s
+task-6: Item 6 - First Chunk Latency: 3.1465s, Second Chunk Latency: 1.7422540187835693, Total Latency: 17.5498s, Duration: 6.2800s
+task-11: Item 7 - First Chunk Latency: 3.1046s, Second Chunk Latency: 1.2840769290924072, Total Latency: 10.0798s, Duration: 3.5600s
+task-11: Closing stream and sync client...
+task-11: Finished streaming processing. Total duration synthesized: 29.2400s
+task-11: Dropped first 4 requests as warmup from latency aggregation.
+task-10: Item 3 - First Chunk Latency: 2.6631s, Second Chunk Latency: 1.2340326309204102, Total Latency: 15.1476s, Duration: 5.8800s
+task-5: Item 5 - First Chunk Latency: 3.2167s, Second Chunk Latency: 1.3855595588684082, Total Latency: 11.6683s, Duration: 3.7600s
+task-1: Item 5 - First Chunk Latency: 2.8908s, Second Chunk Latency: 1.5488619804382324, Total Latency: 11.2853s, Duration: 3.9600s
+task-3: Item 1 - First Chunk Latency: 3.1036s, Second Chunk Latency: 1.2063393592834473, Total Latency: 11.6220s, Duration: 4.1600s
+task-4: Item 5 - First Chunk Latency: 2.8164s, Second Chunk Latency: 1.1996605396270752, Total Latency: 19.3791s, Duration: 7.4400s
+task-7: Item 2 - First Chunk Latency: 2.7566s, Second Chunk Latency: 1.4235377311706543, Total Latency: 81.8129s, Duration: 24.0000s
+task-10: Item 4 - First Chunk Latency: 2.6272s, Second Chunk Latency: 1.157562017440796, Total Latency: 8.3665s, Duration: 3.0400s
+task-10: Processing item 5/8
+task-5: Item 6 - First Chunk Latency: 3.0584s, Second Chunk Latency: 1.242903470993042, Total Latency: 8.3399s, Duration: 2.9200s
+task-3: Item 2 - First Chunk Latency: 2.7468s, Second Chunk Latency: 1.3722882270812988, Total Latency: 9.6881s, Duration: 3.6400s
+task-6: Item 7 - First Chunk Latency: 2.9302s, Second Chunk Latency: 1.1028711795806885, Total Latency: 16.5180s, Duration: 6.1200s
+task-6: Closing stream and sync client...
+task-6: Finished streaming processing. Total duration synthesized: 34.0400s
+task-6: Dropped first 4 requests as warmup from latency aggregation.
+task-2: Item 6 - First Chunk Latency: 3.0119s, Second Chunk Latency: 1.2747423648834229, Total Latency: 26.4561s, Duration: 9.7200s
+task-8: Item 5 - First Chunk Latency: 2.8955s, Second Chunk Latency: 1.8103222846984863, Total Latency: 21.3709s, Duration: 8.4000s
+task-1: Item 6 - First Chunk Latency: 2.9031s, Second Chunk Latency: 1.3405568599700928, Total Latency: 13.0779s, Duration: 5.2000s
+task-4: Item 6 - First Chunk Latency: 2.7903s, Second Chunk Latency: 1.0035433769226074, Total Latency: 9.6940s, Duration: 4.1200s
+task-10: Item 5 - First Chunk Latency: 2.6855s, Second Chunk Latency: 1.3783698081970215, Total Latency: 9.8738s, Duration: 4.0400s
+task-9: Item 7 - First Chunk Latency: 2.8510s, Second Chunk Latency: 1.2964022159576416, Total Latency: 26.7995s, Duration: 10.5600s
+task-9: Closing stream and sync client...
+task-9: Finished streaming processing. Total duration synthesized: 38.3600s
+task-9: Dropped first 4 requests as warmup from latency aggregation.
+task-3: Item 3 - First Chunk Latency: 2.5070s, Second Chunk Latency: 1.0302016735076904, Total Latency: 9.8609s, Duration: 4.1600s
+task-4: Item 7 - First Chunk Latency: 2.4669s, Second Chunk Latency: 1.061377763748169, Total Latency: 7.4805s, Duration: 2.8800s
+task-4: Closing stream and sync client...
+task-4: Finished streaming processing. Total duration synthesized: 40.6400s
+task-4: Dropped first 4 requests as warmup from latency aggregation.
+task-5: Item 7 - First Chunk Latency: 3.0562s, Second Chunk Latency: 1.3834478855133057, Total Latency: 15.3545s, Duration: 6.6000s
+task-5: Closing stream and sync client...
+task-5: Finished streaming processing. Total duration synthesized: 39.7600s
+task-5: Dropped first 4 requests as warmup from latency aggregation.
+task-2: Item 7 - First Chunk Latency: 2.3338s, Second Chunk Latency: 1.2289109230041504, Total Latency: 10.6207s, Duration: 4.5600s
+task-2: Closing stream and sync client...
+task-2: Finished streaming processing. Total duration synthesized: 40.8000s
+task-2: Dropped first 4 requests as warmup from latency aggregation.
+task-1: Item 7 - First Chunk Latency: 2.2158s, Second Chunk Latency: 1.143282413482666, Total Latency: 10.9412s, Duration: 4.9600s
+task-1: Closing stream and sync client...
+task-1: Finished streaming processing. Total duration synthesized: 41.2800s
+task-1: Dropped first 4 requests as warmup from latency aggregation.
+task-8: Item 6 - First Chunk Latency: 2.1623s, Second Chunk Latency: 1.0854401588439941, Total Latency: 11.8053s, Duration: 6.0400s
+task-7: Item 3 - First Chunk Latency: 2.7023s, Second Chunk Latency: 1.482264757156372, Total Latency: 18.9968s, Duration: 8.5600s
+task-10: Item 6 - First Chunk Latency: 2.5222s, Second Chunk Latency: 1.4110791683197021, Total Latency: 10.0751s, Duration: 6.0400s
+task-0: Item 6 - First Chunk Latency: 3.4709s, Second Chunk Latency: 1.3624029159545898, Total Latency: 33.9643s, Duration: 13.6000s
+task-3: Item 4 - First Chunk Latency: 1.8389s, Second Chunk Latency: 0.7109072208404541, Total Latency: 5.5303s, Duration: 3.9200s
+task-3: Processing item 5/8
+task-10: Item 7 - First Chunk Latency: 0.8051s, Second Chunk Latency: 0.5487329959869385, Total Latency: 2.4590s, Duration: 2.4400s
+task-10: Closing stream and sync client...
+task-10: Finished streaming processing. Total duration synthesized: 45.4800s
+task-10: Dropped first 4 requests as warmup from latency aggregation.
+task-7: Item 4 - First Chunk Latency: 1.0765s, Second Chunk Latency: 0.4008049964904785, Total Latency: 3.8952s, Duration: 3.2800s
+task-7: Processing item 5/8
+task-8: Item 7 - First Chunk Latency: 1.2584s, Second Chunk Latency: 0.5808107852935791, Total Latency: 5.0461s, Duration: 4.5600s
+task-8: Closing stream and sync client...
+task-8: Finished streaming processing. Total duration synthesized: 45.8400s
+task-8: Dropped first 4 requests as warmup from latency aggregation.
+task-3: Item 5 - First Chunk Latency: 1.0532s, Second Chunk Latency: 0.5339765548706055, Total Latency: 4.6443s, Duration: 4.8400s
+task-0: Item 7 - First Chunk Latency: 0.7138s, Second Chunk Latency: 0.6080634593963623, Total Latency: 4.9127s, Duration: 5.3600s
+task-0: Closing stream and sync client...
+task-0: Finished streaming processing. Total duration synthesized: 45.8000s
+task-0: Dropped first 4 requests as warmup from latency aggregation.
+task-7: Item 5 - First Chunk Latency: 0.7383s, Second Chunk Latency: 0.4712648391723633, Total Latency: 5.5331s, Duration: 6.9600s
+task-3: Item 6 - First Chunk Latency: 0.6841s, Second Chunk Latency: 0.424544095993042, Total Latency: 4.3917s, Duration: 5.8800s
+task-7: Item 6 - First Chunk Latency: 0.6069s, Second Chunk Latency: 0.40280890464782715, Total Latency: 3.0899s, Duration: 3.9600s
+task-3: Item 7 - First Chunk Latency: 0.6191s, Second Chunk Latency: 0.43713855743408203, Total Latency: 3.2975s, Duration: 3.7200s
+task-3: Closing stream and sync client...
+task-3: Finished streaming processing. Total duration synthesized: 54.3200s
+task-3: Dropped first 4 requests as warmup from latency aggregation.
+task-7: Item 7 - First Chunk Latency: 0.5574s, Second Chunk Latency: 0.416942834854126, Total Latency: 5.2690s, Duration: 7.1600s
+task-7: Closing stream and sync client...
+task-7: Finished streaming processing. Total duration synthesized: 58.2400s
+task-7: Dropped first 4 requests as warmup from latency aggregation.
+Mode: streaming
+RTF: 0.2544
+total_duration: 513.800 seconds
+(0.14 hours)
+processing time: 130.724 seconds (0.04 hours)
+
+--- Total Request Latency ---
+total_request_latency_variance: 41690.13
+total_request_latency_50_percentile_ms: 10077.44
+total_request_latency_90_percentile_ms: 19155.52
+total_request_latency_95_percentile_ms: 24676.25
+total_request_latency_99_percentile_ms: 30596.86
+average_total_request_latency_ms: 11464.22
+
+--- First Chunk Latency ---
+first_chunk_latency_variance: 882.24
+first_chunk_latency_50_percentile_ms: 2893.18
+first_chunk_latency_90_percentile_ms: 3359.53
+first_chunk_latency_95_percentile_ms: 3458.37
+first_chunk_latency_99_percentile_ms: 3512.62
+average_first_chunk_latency_ms: 2504.23
+
+--- Second Chunk Latency ---
+second_chunk_latency_variance: 157.05
+second_chunk_latency_50_percentile_ms: 1236.48
+second_chunk_latency_90_percentile_ms: 1521.63
+second_chunk_latency_95_percentile_ms: 1709.44
+second_chunk_latency_99_percentile_ms: 1842.84
+average_second_chunk_latency_ms: 1147.35
+
+--- Inter-Chunk Interval (jitter) ---
+inter_chunk_count: 366
+inter_chunk_interval_50_percentile_ms: 1289.01
+inter_chunk_interval_90_percentile_ms: 1653.43
+inter_chunk_interval_95_percentile_ms: 1740.55
+inter_chunk_interval_99_percentile_ms: 1981.11
+inter_chunk_interval_max_ms: 2153.96
+average_inter_chunk_interval_ms: 1175.01
+stutter_fraction_above_1000ms: 0.7186
+
+Fetching inference statistics after running tasks...
+Calculating statistics difference...
+Fetching model config...
+Closing temporary async stats client...

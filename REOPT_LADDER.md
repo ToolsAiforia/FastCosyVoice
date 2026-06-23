@@ -78,7 +78,34 @@ Caveat: this baseline compares vanilla-OFFLINE-torchLLM vs round-9-STREAMING-trt
 - Optional max-speed: + `flow_trt=1` → TTFA 283 ms at UTMOS 4.011 (−0.054, +clicks) — ship only if 283 ms is required.
 - Trim (enable_trim=1) is orthogonal — only removes leading silence; toggle for UX.
 
-## S12 TTFA vs concurrency (END-TO-END: LLM+flow+vocoder, BLS=16, ref neutral_2)
+## ⚠️ CORRECTED WARM BENCHMARKS (cold-start fixed — these supersede everything below)
+
+Methodology: per config — cold restart → **`warmup.py --waves 3 --concurrency 16`** (primes all instances + TRT plans + CUDA graphs) → official `client_grpc.py` sweep (seed_tts zero-shot, max_samples=96, warmup-requests=4). GPU steady at 1755 MHz. **Validated**: config A (hop8+TRT) reproduces documented round-9 (N=8 TTFA p50 427ms vs doc 429ms, stutter 5.8% vs 6.3%).
+
+Note: the bogus "4327 ms @N=4" earlier came from my ad-hoc `reopt_ttfa_bench.py` (no warmup) — *that* was cold. The official `client_grpc` numbers I reported were already ~warm and match these within run-to-run noise.
+
+**TTFA p50 (ms) / stutter — three configs, warm:**
+
+| N | A: prod hop8+TRT | B: **S13-cons hop15+TRT** | C: S12 hop15 no-TRT |
+|---|---|---|---|
+| 1 | 284 / 0% | 308 / 0% | 624 / 0% |
+| 4 | 349 / 2.5% | 534 / 0% | 859 / 1.9% |
+| 6 | 400 / 1.9% | 690 / 0% | 1308 / 7.3% |
+| 8 | **427 / 5.8%** | **890 / 0%** | 1845 / 24.7% |
+| 12 | 530 / 14.5% | 1149 / 0% | 2893 / 72% |
+
+RTF (lower=faster): A 0.05–0.17, B 0.09–0.30, C 0.25–0.81. Per-stage GPU (B,N=8 cumulative): token2wav/flow 165s, vocoder 93s dominate; audio_tokenizer 3.3s, speaker_embedding 2.8s, BLS 0.1s.
+
+**Verdict (warm, trustworthy):**
+- **A (prod hop8)**: lowest TTFA (427ms @N=8) — waits for only 9 tokens — but **stutters 5.8%→14.5%** at N≥8 and worst quality (UTMOS 3.74).
+- **B (S13-conservative)**: **0% stutter at every N**, best speed/quality balance (UTMOS 4.011), but TTFA ~2× of A (890ms @N=8) — the real, non-cold cost of hop15 (waits for 18 tokens). RTF 0.09–0.30 = comfortably realtime.
+- **C (S12 no-TRT)**: highest TTFA + stutter explodes (24–72% at N≥8). **Offline / N≤4 only.** TRT flow is mandatory for concurrency.
+
+**Production call:** if TTFA <500ms @N=8 is a hard requirement → only A's hop8 hits it, but it stutters + lower quality. **B (hop15+TRT) is the right default** for streaming-at-scale: zero stutter to N=12, RTF≈0.1, +0.27 UTMOS over prod; TTFA 0.9s @N=8 is acceptable for most voice-chat. If both <500ms TTFA AND zero stutter are needed at N=8, a **middle hop (~10–12) + TRT** is the next thing to sweep (user deferred it).
+
+---
+
+## (OLD — COLD/INVALID) S12 TTFA vs concurrency (END-TO-END: LLM+flow+vocoder, BLS=16, ref neutral_2)
 
 | N | mean | p50 | p95 | max |
 |---|---|---|---|---|

@@ -179,7 +179,12 @@ class TritonPythonModel:
 
     async def forward_llm_streaming(self, target_text, reference_text, prompt_speech_tokens):
         """Async generator: stream LLM tokens via httpx SSE."""
-        full_text = f"{reference_text}{target_text}"
+        # Separate the prompt transcription and the target text with exactly one
+        # space. Gluing them ("...clarification.Am I...") occasionally makes the
+        # Qwen2 tokenizer merge the boundary into a bad token, so the LLM stumbles
+        # on the first word — dropping it or hallucinating an extra leading word
+        # ("I'm I speaking..."). A space is the natural sentence boundary.
+        full_text = f"{reference_text.rstrip()} {target_text.lstrip()}"
         prompt_speech_tokens_str = self._convert_speech_tokens_to_str(prompt_speech_tokens)
 
         chat = [
@@ -239,7 +244,12 @@ class TritonPythonModel:
 
     async def forward_llm_offline(self, target_text, reference_text, prompt_speech_tokens):
         """Non-streaming LLM call, returns all speech token IDs at once."""
-        full_text = f"{reference_text}{target_text}"
+        # Separate the prompt transcription and the target text with exactly one
+        # space. Gluing them ("...clarification.Am I...") occasionally makes the
+        # Qwen2 tokenizer merge the boundary into a bad token, so the LLM stumbles
+        # on the first word — dropping it or hallucinating an extra leading word
+        # ("I'm I speaking..."). A space is the natural sentence boundary.
+        full_text = f"{reference_text.rstrip()} {target_text.lstrip()}"
         prompt_speech_tokens_str = self._convert_speech_tokens_to_str(prompt_speech_tokens)
 
         chat = [

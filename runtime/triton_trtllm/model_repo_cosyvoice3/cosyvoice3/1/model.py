@@ -73,7 +73,7 @@ class TritonPythonModel:
         self.token_hop_len = int(model_params.get("token_hop_len", 8))                     # S14=8 chunk-0, S13=15
         self.dynamic_chunk_strategy = model_params.get("dynamic_chunk_strategy", "exponential")  # S14="exponential", S13="fixed"
         self.max_token_hop_len = int(model_params.get("max_token_hop_len", "25"))          # S14 cap; 100000=uncapped
-        self.enable_trim = model_params.get("enable_trim", "0") == "1"                    # shipped off (model's natural lead)
+        self.enable_trim = model_params.get("enable_trim", "1") == "1"                    # shipped ON: strip LLM leading silence (toggle off for vanilla-gold byte-identity)
         self.prompt_feat_fp16 = model_params.get("prompt_feat_fp16", "1") == "1"          # fp16 (lossless)
         self.llm_seed = model_params.get("llm_seed", "")                                  # "" = no seed
         self.logger.log_info(f"CosyVoice3 BLS initialized, decoupled={self.decoupled}, "
@@ -446,7 +446,7 @@ class TritonPythonModel:
 
         return prompt_speech_tokens_for_llm, prompt_speech_tokens, prompt_speech_feat, prompt_spk_embedding, reference_text
 
-    def _trim_leading_silence(self, wav, thr=0.02, win=240, preroll=120, fade_len=360):
+    def _trim_leading_silence(self, wav, thr_floor=0.01, rel=0.15, win=240, preroll=120, fade_len=360):
         """Drop the LLM's leading pause/breath from the FIRST emitted chunk.
 
         The CosyVoice3 LLM emits silence speech-tokens before the content, so
@@ -455,6 +455,11 @@ class TritonPythonModel:
         pre-roll), and Hann fade-in the new onset (also kills the chunk-0 click).
         Deterministic, reference-agnostic, and lowers TTFA. Returns the trimmed
         [1, T] waveform, or None if the whole chunk is still below threshold.
+
+        Onset threshold is adaptive: max(thr_floor, rel * peak-window-RMS). The
+        relative term tracks quiet speakers (e.g. spk06 ~-28 dBFS) whose onset
+        would be missed by a fixed 0.02, while thr_floor keeps an all-silence
+        chunk from false-triggering on its own noise floor (returns None then).
 
         Ladder knob: when enable_trim is False this is a passthrough (returns the
         waveform unchanged) so the baseline emits the model's true leading silence.
@@ -469,6 +474,7 @@ class TritonPythonModel:
         if n > 0:
             wv = x[:n * win].reshape(n, win)
             rms = torch.sqrt((wv * wv).mean(dim=1) + 1e-9)
+            thr = max(thr_floor, float(rms.max()) * rel)
             nz = torch.nonzero(rms > thr)
             if nz.numel() == 0:
                 return None  # all silence — wait for the next chunk
@@ -636,12 +642,21 @@ class TritonPythonModel:
                     accumulated_mel[:, :, :mel_len].contiguous(), finalize=True)
 
                 new_speech = speech[:, speech_offset:]
-                if not speech_started and new_speech.shape[1] > 0:
-                    # Short utterance: all audio arrived in the final chunk —
-                    # trim its leading silence too.
-                    new_speech = self._trim_leading_silence(new_speech)
-                    if new_speech is not None and new_speech.shape[1] > 0:
-                        speech_started = True
+                if not speech_started:
+                    # Short utterance: all audio arrived in the final chunk — trim
+                    # its leading silence too. If trim finds no onset (whole
+                    # utterance sub-threshold, e.g. a near-silent generation for a
+                    # quiet speaker), fall back to emitting untrimmed audio so the
+                    # client NEVER receives zero waveform packets (which crashes it).
+                    trimmed = (self._trim_leading_silence(new_speech)
+                               if new_speech.shape[1] > 0 else None)
+                    if trimmed is not None and trimmed.shape[1] > 0:
+                        new_speech = trimmed
+                    elif new_speech.shape[1] > 0:
+                        pass  # safety net: emit the untrimmed final tail
+                    else:
+                        new_speech = speech  # nothing was ever sent — emit all
+                    speech_started = new_speech.shape[1] > 0
                 if new_speech is not None and new_speech.shape[1] > 0:
                     audio_tensor = pb_utils.Tensor.from_dlpack(
                         "waveform", to_dlpack(new_speech))

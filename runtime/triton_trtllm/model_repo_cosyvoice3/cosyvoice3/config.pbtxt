@@ -33,6 +33,10 @@ parameters [
   {
    key: "llm_api_base",
    value: {string_value:"LLM_API_BASE_PLACEHOLDER"}
+  },
+  {
+   key: "enable_trim",
+   value: {string_value:"1"}
   }
 ]
 
